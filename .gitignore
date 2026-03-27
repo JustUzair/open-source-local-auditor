@@ -1,0 +1,18 @@
+node_modules/
+dist/
+*.env
+
+# Data — vector store and raw scraped data are too large for git.
+# Distribute via GitHub Releases. Users run: npm run setup -- --download
+data/vectorstore/
+data/raw/
+data/clusters/
+data/embeddings-raw.jsonl
+data/ingest-checkpoint.json
+
+# Keep the data directory itself
+!data/.gitkeep
+
+# OS
+.DS_Store
+*.log

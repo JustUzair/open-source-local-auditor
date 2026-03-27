@@ -1,0 +1,68 @@
+{
+  "name": "sentinelai",
+  "version": "0.1.0",
+  "description": "Model-agnostic AI-powered Solidity security auditor",
+  "author": {
+    "name": "Uzair (JustUzair) Saiyed",
+    "url": "https://github.com/JustUzair"
+  },
+  "type": "module",
+  "bin": {
+    "sentinel": "./dist/cli.js"
+  },
+  "scripts": {
+    "dev": "tsx watch src/interfaces/web.ts",
+    "build": "tsup",
+    "start": "node dist/web.js",
+    "sentinel": "tsx src/interfaces/cli.ts",
+    "setup": "tsx scripts/setup.ts",
+    "scrape": "tsx scripts/01_scrape.ts",
+    "ingest": "tsx scripts/02_ingest.ts",
+    "cluster": "tsx scripts/03_cluster.ts",
+    "test": "vitest",
+    "test:recon": "tsx scripts/test/recon.ts",
+    "test:retriever": "tsx scripts/test/retriever.ts",
+    "test:audit": "tsx scripts/test/audit.ts"
+  },
+  "dependencies": {
+    "@langchain/anthropic": "^0.3.0",
+    "@langchain/community": "^0.3.0",
+    "@langchain/core": "^0.3.0",
+    "@langchain/google-genai": "^0.1.0",
+    "@langchain/groq": "^0.1.0",
+    "@langchain/ollama": "^0.2.0",
+    "@langchain/openai": "^0.3.0",
+    "@langchain/textsplitters": "^0.1.0",
+    "@solidity-parser/parser": "^0.18.0",
+    "adm-zip": "^0.5.16",
+    "axios": "^1.7.0",
+    "cheerio": "^1.0.0",
+    "cli-progress": "^3.12.0",
+    "commander": "^12.1.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.0",
+    "express": "^4.21.0",
+    "express-rate-limit": "^7.4.0",
+    "hnswlib-node": "^3.0.0",
+    "langchain": "^0.3.0",
+    "ml-kmeans": "^6.0.0",
+    "multer": "^2.0.0",
+    "nanoid": "^5.0.0",
+    "ora": "^8.1.0",
+    "p-limit": "^6.1.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@google/generative-ai": "^0.21.0",
+    "@types/adm-zip": "^0.5.7",
+    "@types/cli-progress": "^3.11.6",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/multer": "^1.4.12",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "tsup": "^8.3.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  }
+}
