@@ -7,54 +7,90 @@ const Provider = z.enum(["ollama", "gemini", "groq", "openai", "anthropic"]);
 const EmbedProvider = z.enum(["ollama", "gemini", "openai"]);
 const LogLevel = z.enum(["debug", "info", "warn", "error"]).default("info");
 
-const EnvSchema = z.object({
-  // ── Auditor count ──────────────────────────────────────────────────────────
-  N_AUDITORS: z.coerce.number().int().min(1).max(3).default(1),
+// Helper to convert empty string to undefined
+const emptyToUndef = z.preprocess(
+  val => (val === "" ? undefined : val),
+  z.any(),
+);
 
-  // ── Auditor 1 (always required) ────────────────────────────────────────────
-  AUDITOR_1_PROVIDER: Provider.default("ollama"),
-  AUDITOR_1_MODEL: z.string().min(1).default("qwen-junior-auditor"),
-  AUDITOR_1_API_KEY: z.string().default(""),
+const EnvSchema = z
+  .object({
+    N_AUDITORS: z.coerce.number().int().min(1).max(3).default(1),
 
-  // ── Auditor 2 (required when N_AUDITORS >= 2) ──────────────────────────────
-  AUDITOR_2_PROVIDER: Provider.default("ollama"),
-  AUDITOR_2_MODEL: z.string().default("qwen-senior-auditor"),
-  AUDITOR_2_API_KEY: z.string().default(""),
+    // Auditor 1 (always required)
+    AUDITOR_1_PROVIDER: Provider.default("ollama"),
+    AUDITOR_1_MODEL: z.string().min(1).default("qwen-junior-auditor"),
+    AUDITOR_1_API_KEY: emptyToUndef.pipe(z.string().optional()),
 
-  // ── Auditor 3 (required when N_AUDITORS >= 3) ──────────────────────────────
-  AUDITOR_3_PROVIDER: Provider.default("ollama"),
-  AUDITOR_3_MODEL: z.string().default("glm-senior-auditor"),
-  AUDITOR_3_API_KEY: z.string().default(""),
+    // Auditor 2 (conditionally required)
+    AUDITOR_2_PROVIDER: emptyToUndef.pipe(Provider.optional()),
+    AUDITOR_2_MODEL: emptyToUndef.pipe(z.string().min(1).optional()),
+    AUDITOR_2_API_KEY: emptyToUndef.pipe(z.string().optional()),
 
-  // ── Supervisor ─────────────────────────────────────────────────────────────
-  SUPERVISOR_PROVIDER: Provider.default("ollama"),
-  SUPERVISOR_MODEL: z.string().min(1).default("glm-supervisor"),
-  SUPERVISOR_API_KEY: z.string().default(""),
+    // Auditor 3 (conditionally required)
+    AUDITOR_3_PROVIDER: emptyToUndef.pipe(Provider.optional()),
+    AUDITOR_3_MODEL: emptyToUndef.pipe(z.string().min(1).optional()),
+    AUDITOR_3_API_KEY: emptyToUndef.pipe(z.string().optional()),
 
-  // ── Embeddings ─────────────────────────────────────────────────────────────
-  EMBEDDING_PROVIDER: EmbedProvider.default("gemini"),
-  EMBEDDING_MODEL: z.string().min(1).default("gemini-embedding-001"),
-  EMBEDDING_API_KEY: z.string().default(""),
+    // Supervisor
+    SUPERVISOR_PROVIDER: Provider,
+    SUPERVISOR_MODEL: z.string().min(1).default("glm-supervisor"),
+    SUPERVISOR_API_KEY: z.string().default(""),
 
-  // ── Local services ─────────────────────────────────────────────────────────
-  OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
+    // Embeddings
+    EMBEDDING_PROVIDER: EmbedProvider,
+    EMBEDDING_MODEL: z.string().min(1).default("qwen3-embedding:4b"),
+    EMBEDDING_API_KEY: z.string().default(""),
 
-  // ── Web server ─────────────────────────────────────────────────────────────
-  PORT: z.coerce.number().int().positive().default(8000),
-  ALLOWED_ORIGIN: z.string().default("http://localhost:3000"),
+    OLLAMA_BASE_URL: z.string().url().default("http://localhost:11434"),
+    PORT: z.coerce.number().int().positive().default(8000),
+    ALLOWED_ORIGIN: z.string().default("http://localhost:3000"),
+    SOLODIT_API_KEY: z.string().default(""),
+    DATA_DIR: z.string().min(1).default("./data"),
+    SENTINEL_LOG_LEVEL: LogLevel,
+    NODE_ENV: z
+      .enum(["development", "production", "test"])
+      .default("development"),
+  })
+  .superRefine((data, ctx) => {
+    const n = data.N_AUDITORS;
 
-  // ── Data sources ───────────────────────────────────────────────────────────
-  SOLODIT_API_KEY: z.string().default(""),
+    // Auditor 2 required if N_AUDITORS >= 2
+    if (n >= 2) {
+      if (!data.AUDITOR_2_PROVIDER) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDITOR_2_PROVIDER"],
+          message: "Required when N_AUDITORS >= 2",
+        });
+      }
+      if (!data.AUDITOR_2_MODEL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDITOR_2_MODEL"],
+          message: "Required when N_AUDITORS >= 2",
+        });
+      }
+    }
 
-  // ── Paths ──────────────────────────────────────────────────────────────────
-  DATA_DIR: z.string().min(1).default("./data"),
-
-  // ── Developer ──────────────────────────────────────────────────────────────
-  SENTINEL_LOG_LEVEL: LogLevel,
-  NODE_ENV: z
-    .enum(["development", "production", "test"])
-    .default("development"),
-});
+    // Auditor 3 required if N_AUDITORS >= 3
+    if (n >= 3) {
+      if (!data.AUDITOR_3_PROVIDER) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDITOR_3_PROVIDER"],
+          message: "Required when N_AUDITORS >= 3",
+        });
+      }
+      if (!data.AUDITOR_3_MODEL) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["AUDITOR_3_MODEL"],
+          message: "Required when N_AUDITORS >= 3",
+        });
+      }
+    }
+  });
 
 export type Env = z.infer<typeof EnvSchema>;
 
