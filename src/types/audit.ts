@@ -1,6 +1,5 @@
 import { z } from "zod";
-import type { ReconContext } from "./recon.js";
-import type { EngineConfig } from "./models.js";
+import { ProtocolMap, SuspicionNote, ProtocolSize } from "./protocol.js";
 
 // ─── Finding Schemas ──────────────────────────────────────────────────────────
 
@@ -28,8 +27,16 @@ export const FindingSchema = z.object({
 });
 export type Finding = z.infer<typeof FindingSchema>;
 
+export const SuspicionNoteSchema = z.object({
+  targetFile: z.string(),
+  targetFunction: z.string().optional(),
+  reason: z.string().min(10),
+  confidence: z.number().min(0).max(1),
+});
+
 export const AgentOutputSchema = z.object({
   findings: z.array(FindingSchema),
+  suspicions: z.array(SuspicionNoteSchema).optional().default([]),
 });
 export type AgentOutput = z.infer<typeof AgentOutputSchema>;
 
@@ -136,8 +143,12 @@ export type AuditResult =
       report: AuditReport;
       findings: FinalFinding[];
       debug: {
-        reconContext: ReconContext;
+        protocolMap: ProtocolMap;
+        allSuspicionNotes: SuspicionNote[]; // every note emitted, including discarded ones
+        propagatedSuspicions: SuspicionNote[]; // notes that passed confidence threshold
         auditorResults: AuditorResult[];
+        passCount: number; // actual passes completed
+        protocolSize: ProtocolSize;
       };
     }
   | {
