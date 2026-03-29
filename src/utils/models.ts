@@ -27,6 +27,7 @@ import { logger } from "./logger.js";
 export function buildModel(
   slot: ModelSlotConfig,
   temperature: number,
+  OLLAMA_BASE_URL: string = env.OLLAMA_BASE_URL,
 ): BaseChatModel {
   const { provider, model, apiKey } = slot;
 
@@ -71,7 +72,7 @@ export function buildModel(
       // so misconfiguration degrades gracefully to local.
       return new ChatOllama({
         model,
-        baseUrl: env.OLLAMA_BASE_URL,
+        baseUrl: OLLAMA_BASE_URL,
         temperature,
         numPredict: 4096,
       });
@@ -110,7 +111,7 @@ export function makeAuditorModel(slotIndex: 1 | 2 | 3): BaseChatModel {
 
 /** Supervisor uses temperature 0.0 — purely logical, no creativity. */
 export function makeSupervisorModel(): BaseChatModel {
-  return buildModel(readSupervisorSlot(), 0.0);
+  return buildModel(readSupervisorSlot(), 0.0, "http://192.168.0.200:11434");
 }
 
 // ─── Embedding Model ──────────────────────────────────────────────────────────
