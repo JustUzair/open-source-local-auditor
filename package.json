@@ -14,15 +14,15 @@
     "dev": "tsx watch src/interfaces/web.ts",
     "build": "tsup",
     "start": "node dist/web.js",
+    "hydrate": "git submodule update --init --recursive && git submodule sync",
     "sentinel": "tsx src/interfaces/cli.ts",
-    "setup": "tsx scripts/setup.ts",
-    "scrape": "tsx scripts/01_scrape.ts",
-    "ingest": "tsx scripts/02_ingest.ts",
-    "cluster": "tsx scripts/03_cluster.ts",
+    "setup": "tsx src/scripts/00_setup.ts",
+    "ingest": "tsx src/scripts/01_ingest.ts",
+    "cluster": "tsx src/scripts/02_cluster.ts",
     "test": "vitest",
-    "test:recon": "tsx scripts/test/recon.ts",
-    "test:retriever": "tsx scripts/test/retriever.ts",
-    "test:audit": "tsx scripts/test/audit.ts"
+    "test:recon": "tsx src/scripts/test/recon.ts",
+    "test:retriever": "tsx src/scripts/test/retriever.ts",
+    "test:audit": "tsx src/scripts/test/audit.ts"
   },
   "dependencies": {
     "@langchain/anthropic": "^0.3.0",
@@ -64,5 +64,6 @@
     "tsup": "^8.3.0",
     "typescript": "^5.6.0",
     "vitest": "^2.1.0"
-  }
+  },
+  "license": "ISC"
 }
