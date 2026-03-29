@@ -595,7 +595,6 @@ Using the Function-State Matrix from Phase 1:
 9. Assess IMPACT (what can an attacker gain/break?)
 10. Classify severity: CRITICAL / HIGH / MEDIUM / LOW
 11. Suggest a FIX (minimal, targeted)
-    Save raw (unverified) findings to: .audit/findings/feynman-analysis-raw.md
 
 IMPORTANT: Do NOT report raw findings to the user as final results. These are HYPOTHESES that must be verified in Phase 5 before inclusion in the final report.
 
@@ -657,119 +656,24 @@ These patterns frequently produce hypotheses that fail verification:
 Phase 5 Output:
 After verification, produce the VERIFIED findings file:
 
-Save to: .audit/findings/feynman-verified.md
+════════════════════════════════
+OUTPUT FORMAT For all TRUE POSITIVES found after Feynman and Nemesis Loops:
+════════════════════════════════
+Respond with ONLY a valid JSON array. No markdown. No text before or after.
+Start with [ and end with ].
 
-# Feynman Audit — Verified Findings
-
-## Verification Summary
-
-| ID     | Original Severity | Verdict                   | Final Severity |
-| ------ | ----------------- | ------------------------- | -------------- |
-| FF-001 | CRITICAL          | TRUE POSITIVE — DOWNGRADE | LOW            |
-| FF-002 | HIGH              | TRUE POSITIVE             | HIGH           |
-| FF-003 | MEDIUM            | FALSE POSITIVE            | —              |
-| ...    | ...               | ...                       | ...            |
-
-## Verified TRUE POSITIVE Findings
-
-[Only findings that passed verification, with final severity]
-
-## False Positives Eliminated
-
-[Findings that failed verification, with explanation of why]
-
-## Downgraded Findings
-
-[Findings where severity was reduced, with justification]
-Only the verified findings file should be presented to the user as the final report.
-
-Severity Classification
-Severity Criteria
-CRITICAL Direct value/fund loss, permanent DoS, or system insolvency
-HIGH Conditional value loss, privilege escalation, or broken core invariant
-MEDIUM Value leakage, griefing with cost, or degraded functionality
-LOW Informational, inefficiency, or cosmetic inconsistency with no exploit
-Output Format
-Two files are produced during the audit:
-
-1. Raw Findings (intermediate — NOT the final deliverable)
-   Save to: .audit/findings/feynman-analysis-raw.md
-
-This contains ALL hypotheses from Phases 1-4 before verification. Include the Function-State Matrix, Guard Consistency Analysis, Inverse Operation Parity, and all raw findings with their initial severity classification.
-
-2. Verified Findings (FINAL deliverable — present this to the user)
-   Save to: .audit/findings/feynman-verified.md
-
-# Feynman Audit — Verified Findings
-
-## Scope
-
-- Language: [detected language]
-- Modules analyzed: [list]
-- Functions analyzed: [count]
-- Lines interrogated: [count]
-
-## Verification Summary
-
-| ID  | Original Severity | Verdict | Final Severity |
-| --- | ----------------- | ------- | -------------- |
-
-## Function-State Matrix
-
-[The matrix from Phase 1]
-
-## Guard Consistency Analysis
-
-[Results from Phase 3.1 — which functions are missing expected guards]
-
-## Inverse Operation Parity
-
-[Results from Phase 3.2 — asymmetries between paired operations]
-
-## Verified Findings (TRUE POSITIVES only)
-
-### Finding FF-001: [Title]
-
-**Severity:** CRITICAL | HIGH | MEDIUM | LOW
-**Module:** [name]
-**Function:** [name]
-**Lines:** [L:start-end]
-**Verification:** [Code trace / PoC / Hybrid] — [test file if PoC]
-
-**Feynman Question that exposed this:**
-
-> [The exact question from the framework]
-
-**The code:**
-
-````[language]
-// [affected code block]
-Why this is wrong: [First-principles explanation — no jargon, no pattern names. Explain like you're teaching someone who has never seen this bug class.]
-
-Verification evidence: [For code trace: the exact mitigating/confirming code paths traced] [For PoC: test name, key log output, concrete numbers]
-
-Attack scenario:
-
-[Step-by-step exploitation]
-Impact: [What an attacker gains or what breaks]
-
-Suggested fix:
-
-// [minimal fix]
-False Positives Eliminated
-[Findings that failed verification, with explanation of WHY they are false]
-
-Downgraded Findings
-[Findings where severity was reduced, with justification]
-
-LOW Findings (verified by inspection)
-[Table of LOW findings with brief verdict]
-
-Summary
-Total functions analyzed: [N]
-Raw findings (pre-verification): [N] CRITICAL | [N] HIGH | [N] MEDIUM | [N] LOW
-After verification: [N] TRUE POSITIVE | [N] FALSE POSITIVE | [N] DOWNGRADED
-Final: [N] HIGH | [N] MEDIUM | [N] LOW
+[
+  {
+    "severity": "Critical|High|Medium|Low|Info",
+    "title": "short title under 10 words",
+    "file": "filename",
+    "line": 0,
+    "coupled_pair": "StateA <-> StateB or null",
+    "description": "what the vulnerability is and exactly why it is wrong",
+    "exploit": "exact numbered step-by-step attack sequence",
+    "recommendation": "concrete minimal fix"
+  }
+]
 
 ---
 
@@ -819,15 +723,13 @@ When starting a Feynman audit:
 - [ ] **Phase 2:** Run Feynman interrogation on every entry point (priority order from Phase 0)
 - [ ] **Phase 3:** Run cross-function analysis (guard consistency, inverse parity, value flow)
 - [ ] **Phase 4:** Document all SUSPECT and VULNERABLE verdicts as raw findings
-- [ ] **Phase 4:** Save raw findings to `.audit/findings/feynman-analysis-raw.md`
 - [ ] **Phase 5:** Verify ALL C/H/M findings (code trace + PoC where needed)
 - [ ] **Phase 5:** Eliminate false positives, downgrade inflated severities
-- [ ] **Phase 5:** Save verified findings to `.audit/findings/feynman-verified.md`
 - [ ] **Phase 5:** Present ONLY the verified report to the user
 
 ---
 name: nemesis-auditor
-description: "The Inescapable Auditor. Runs the full Feynman Auditor (Stage 1) and full State Inconsistency Auditor (Stage 2) as primary steps, then fuses their outputs in a feedback loop (Stage 3) to find bugs at the intersection that neither alone would catch. Language-agnostic. Triggers on /nemesis or nemesis audit."
+description: "The Inescapable Auditor. Runs the full Feynman Auditor (Stage 1) and full State Inconsistency Auditor (Stage 2) as primary steps, then fuses their outputs in a feedback loop (Stage 3) to find bugs at the intersection that neither alone would catch. Language-agnostic. Triggers on nemesis or nemesis audit."
 ---
 
 # N E M E S I S
@@ -835,8 +737,7 @@ description: "The Inescapable Auditor. Runs the full Feynman Auditor (Stage 1) a
 
 ╔═══════════════════════════════════════════════════════════════╗
 ║                                                               ║
-║   "Nemesis — the goddess of divine retribution against        ║
-║    those who succumb to hubris."                              ║
+║   "Nemesis"                                                   ║
 ║                                                               ║
 ║   Your code was written with confidence.                      ║
 ║   Nemesis questions that confidence.                          ║
@@ -849,9 +750,9 @@ description: "The Inescapable Auditor. Runs the full Feynman Auditor (Stage 1) a
 
 Not three sequential stages. An **iterative back-and-forth loop** where Feynman and State Inconsistency run alternating passes — each pass informed by the previous pass's findings — until no new bugs surface.
 
-**Pass 1 (Feynman)** — Run the **complete Feynman Auditor** (`.claude/skills/feynman-auditor/SKILL.md`). Every line questioned. Every ordering challenged. Every assumption exposed. Collect findings + suspects.
+**Pass 1 (Feynman)** — Run the **complete Feynman Auditor** Every line questioned. Every ordering challenged. Every assumption exposed. Collect findings + suspects.
 
-**Pass 2 (State)** — Run the **complete State Inconsistency Auditor** (`.claude/skills/state-inconsistency-auditor/SKILL.md`), **enriched by Pass 1's findings**. Feynman suspects become extra audit targets. Feynman's exposed assumptions reveal new coupled pairs to map. Collect findings + gaps.
+**Pass 2 (State)** — Run the **complete State Inconsistency Auditor** , **enriched by Pass 1's findings**. Feynman suspects become extra audit targets. Feynman's exposed assumptions reveal new coupled pairs to map. Collect findings + gaps.
 
 **Pass 3 (Feynman)** — Re-run Feynman **only on functions/state touched by Pass 2's new findings**. State gaps become new Feynman interrogation targets. Ask: "WHY is this sync missing? What assumption led to the gap? What breaks downstream?" Collect new findings.
 
@@ -865,7 +766,7 @@ Not three sequential stages. An **iterative back-and-forth loop** where Feynman 
 
 ## When to Activate
 
-- User says `/nemesis` or `nemesis audit` or `deep combined audit`
+- User says `nemesis` or `nemesis audit` or `deep combined audit`
 - User wants maximum-depth business logic + state inconsistency coverage
 - When the codebase is complex enough that either auditor alone would miss cross-cutting bugs
 
@@ -879,7 +780,109 @@ Not three sequential stages. An **iterative back-and-forth loop** where Feynman 
 
 ## The Nemesis Execution Model: Iterative Back-and-Forth
 
-┌──────────────────────────────────────────────────────────────────────┐ │ N E M E S I S — I T E R A T I V E L O O P │ ├──────────────────────────────────────────────────────────────────────┤ │ │ │ PHASE 0: RECON │ │ ─────────────── │ │ Attacker mindset (Q0.1-Q0.5) + Initial coupling hypothesis │ │ Output: Hit List + Priority Targets │ │ │ │ ════════════════════════════════════════════════════════════════ │ │ ║ ITERATIVE PASS LOOP BEGINS ║ │ │ ════════════════════════════════════════════════════════════════ │ │ │ │ ┌────────────────────────────────────────────────────────────┐ │ │ │ PASS 1 — FEYNMAN (full skill, first run) │ │ │ │ │ │ │ │ Load: .claude/skills/feynman-auditor/SKILL.md │ │ │ │ Execute complete pipeline: Phase 0→1→2→3→4→5 │ │ │ │ Input: Raw codebase + Phase 0 hit list │ │ │ │ Output: │ │ │ │ • Verified findings (.audit/findings/feynman-pass1.md) │ │ │ │ • SUSPECT verdicts (functions + state vars flagged) │ │ │ │ • Exposed assumptions (implicit trusts about state) │ │ │ │ • Ordering concerns (external call timing issues) │ │ │ │ • Multi-tx state corruption candidates │ │ │ │ • Function-State Matrix │ │ │ └────────────────────────────────────────────────────────────┘ │ │ ↓ feed forward │ │ ┌────────────────────────────────────────────────────────────┐ │ │ │ PASS 2 — STATE INCONSISTENCY (full skill, enriched) │ │ │ │ │ │ │ │ Load: .claude/skills/state-inconsistency-auditor/SKILL.md │ │ │ │ Execute complete pipeline: Phase 1→2→3→4→5→6→7→8 │ │ │ │ Input: Raw codebase + ALL of Pass 1's output │ │ │ │ │ │ │ │ ENRICHMENT from Pass 1: │ │ │ │ • Feynman SUSPECTS → add as extra state audit targets │ │ │ │ • Exposed assumptions → reveal NEW coupled pairs │ │ │ │ ("dev assumes X stays in sync" → map X as coupled) │ │ │ │ • Ordering concerns → check if state gap exists at │ │ │ │ the flagged ordering point │ │ │ │ • Function-State Matrix → use as base for Mutation Matrix │ │ │ │ │ │ │ │ Output: │ │ │ │ • Verified findings (.audit/findings/state-pass2.md) │ │ │ │ • State GAPS (functions missing coupled updates) │ │ │ │ • New coupled pairs discovered via Feynman enrichment │ │ │ │ • Masking code flagged (ternary clamps, min caps) │ │ │ │ • Parallel path mismatches │ │ │ │ • Coupled State Dependency Map │ │ │ │ • Mutation Matrix │ │ │ └────────────────────────────────────────────────────────────┘ │ │ ↓ feed back │ │ ┌────────────────────────────────────────────────────────────┐ │ │ │ PASS 3 — FEYNMAN RE-INTERROGATION (targeted, not full) │ │ │ │ │ │ │ │ Scope: ONLY functions/state touched by Pass 2's NEW output │ │ │ │ DO NOT re-audit what Pass 1 already cleared. │ │ │ │ │ │ │ │ For each State GAP from Pass 2: │ │ │ │ Q: "WHY doesn't [function] update [coupled state B]?" │ │ │ │ Q: "What ASSUMPTION led to this gap?" │ │ │ │ Q: "What DOWNSTREAM function reads B and breaks?" │ │ │ │ Q: "Can an attacker CHOOSE a sequence to exploit this?" │ │ │ │ │ │ │ │ For each MASKING CODE from Pass 2: │ │ │ │ Q: "WHY would this ever underflow/overflow?" │ │ │ │ Q: "What invariant is ACTUALLY broken underneath?" │ │ │ │ → Trace the broken invariant to its root cause mutation │ │ │ │ │ │ │ │ For each NEW COUPLED PAIR from Pass 2: │ │ │ │ Q: "Is this coupling intentional or accidental?" │ │ │ │ Q: "What ordering constraints exist between the pair?" │ │ │ │ Q: "What happens across multiple txs as both drift?" │ │ │ │ │ │ │ │ Output: │ │ │ │ • New findings (.audit/findings/feynman-pass3.md) │ │ │ │ • New suspects (if any) │ │ │ │ • Deeper root cause analysis on Pass 2 gaps │ │ │ │ • Multi-tx adversarial sequences for confirmed bugs │ │ │ └────────────────────────────────────────────────────────────┘ │ │ ↓ feed back │ │ ┌────────────────────────────────────────────────────────────┐ │ │ │ PASS 4 — STATE RE-ANALYSIS (targeted, not full) │ │ │ │ │ │ │ │ Scope: ONLY new coupled pairs + mutation paths from Pass 3 │ │ │ │ DO NOT re-audit what Pass 2 already cleared. │ │ │ │ │ │ │ │ For each NEW SUSPECT from Pass 3: │ │ │ │ → Is this suspect state part of a coupled pair? │ │ │ │ → Does the suspect function update all counterparts? │ │ │ │ → Does the root cause analysis reveal additional gaps? │ │ │ │ │ │ │ │ For each ROOT CAUSE from Pass 3: │ │ │ │ → Trace the root cause mutation through ALL code paths │ │ │ │ → Check parallel paths for the same root cause │ │ │ │ → Check if the root cause affects other coupled pairs │ │ │ │ │ │ │ │ Output: │ │ │ │ • New findings (.audit/findings/state-pass4.md) │ │ │ │ • Any remaining gaps or suspects │ │ │ └────────────────────────────────────────────────────────────┘ │ │ ↓ │ │ ┌────────────────────────────────────────────────────────────┐ │ │ │ CONVERGENCE CHECK │ │ │ │ │ │ │ │ Did the last pass produce ANY new: │ │ │ │ - Findings not in previous passes? │ │ │ │ - Coupled pairs not previously mapped? │ │ │ │ - Suspects not previously flagged? │ │ │ │ - Root causes not previously traced? │ │ │ │ │ │ │ │ IF YES → Continue: Run Pass N+1 (alternate Feynman/State) │ │ │ │ Scope: ONLY new items from the previous pass │ │ │ │ │ │ │ │ IF NO → Converged. Proceed to Final Phase. │ │ │ │ │ │ │ │ SAFETY: Maximum 6 total passes (3 Feynman + 3 State) │ │ │ │ to prevent infinite loops. │ │ │ └────────────────────────────────────────────────────────────┘ │ │ │ │ ════════════════════════════════════════════════════════════════ │ │ ║ ITERATIVE LOOP ENDS ║ │ │ ════════════════════════════════════════════════════════════════ │ │ │ │ FINAL PHASE: CONSOLIDATION │ │ ─────────────────────────── │ │ 1. Merge all pass outputs into unified finding set │ │ 2. Deduplicate (same root cause found from both sides) │ │ 3. Multi-Tx adversarial sequence tracing on ALL confirmed bugs │ │ 4. Final Verification Gate (code trace + PoC for all C/H/M) │ │ 5. Tag each finding with discovery path: │ │ • "Feynman-only" — found in Pass 1, never enriched by State │ │ • "State-only" — found in Pass 2, never enriched by Feynman │ │ • "Cross-feed P[N]→P[M]" — found via back-and-forth interaction │ │ 6. Output: .audit/findings/nemesis-verified.md │ │ │ └──────────────────────────────────────────────────────────────────────┘
+Here’s the **core essence** of your iterative audit loop, rewritten as a pure system prompt / instruction set for an LLM (no Claude Code, no file paths, no markdown references). You can paste this directly into an LLM’s system prompt or use it as a procedural guide.
+
+---
+
+## NEMESIS ITERATIVE AUDIT PROTOCOL (LLM‑only)
+
+You are an autonomous security auditor. Execute the following iterative loop on the given codebase.
+
+### PHASE 0 – Reconnaissance
+- Adopt an attacker mindset (questions Q0.1–Q0.5).
+- Form initial coupling hypotheses.
+- Output: **Hit List** – priority targets (functions, state variables).
+
+---
+
+### ITERATIVE PASS LOOP (alternating Feynman ↔ State)
+
+**Maximum 6 total passes** (3 Feynman + 3 State).  
+Stop earlier if a pass produces **no new** findings, coupled pairs, suspects, or root causes.
+
+#### PASS 1 – Feynman (full analysis)
+- **Scope**: Entire codebase + Phase 0 hit list.
+- **Tasks**:
+  - Identify verified findings.
+  - Flag SUSPECT functions and state variables.
+  - Expose implicit assumptions about state.
+  - Note ordering concerns (external call timing).
+  - Find multi‑transaction state corruption candidates.
+  - Build a **Function‑State Matrix** (which functions read/write which state).
+- **Output**: All the above (feeds into Pass 2).
+
+#### PASS 2 – State Inconsistency (full analysis, enriched with Pass 1)
+- **Scope**: Entire codebase + **all output from Pass 1**.
+- **Enrichment from Pass 1**:
+  - SUSPECTS → treat as extra state audit targets.
+  - Assumptions → derive new coupled state pairs (e.g., “dev assumes X stays in sync with Y”).
+  - Ordering concerns → check if a state gap exists at that point.
+  - Function‑State Matrix → base for Mutation Matrix.
+- **Tasks**:
+  - Find **state gaps** (functions that update one state variable but not its coupled counterpart).
+  - Discover new coupled pairs.
+  - Flag masking code (ternary clamps, min caps, underflow/overflow guards).
+  - Identify parallel path mismatches.
+  - Build **Coupled State Dependency Map** and **Mutation Matrix**.
+- **Output**: All findings + gaps + new pairs + masking code.
+
+#### PASS 3 – Feynman Re‑interrogation (targeted)
+- **Scope**: **Only** functions/state that appeared in **new output from Pass 2**.
+- **Do not** re‑audit what Pass 1 already cleared.
+- **For each state gap** from Pass 2, answer:
+  - Why doesn’t the function update the coupled state variable?
+  - What assumption caused this gap?
+  - Which downstream function reads the stale variable and breaks?
+  - Can an attacker choose a sequence to exploit it?
+- **For each masking code** from Pass 2:
+  - Why would this ever underflow/overflow?
+  - What invariant is actually broken underneath? Trace to its root cause mutation.
+- **For each new coupled pair** from Pass 2:
+  - Is this coupling intentional or accidental?
+  - What ordering constraints exist between the pair?
+  - What happens across multiple transactions as both drift?
+- **Output**: New findings, new suspects (if any), deeper root cause analysis, multi‑tx adversarial sequences for confirmed bugs.
+
+#### PASS 4 – State Re‑analysis (targeted)
+- **Scope**: **Only** new coupled pairs + mutation paths from Pass 3.
+- **Do not** re‑audit what Pass 2 already cleared.
+- **For each new suspect** from Pass 3:
+  - Is this suspect state part of a coupled pair?
+  - Does the suspect function update all counterparts?
+  - Does the root cause analysis reveal additional gaps?
+- **For each root cause** from Pass 3:
+  - Trace that root cause mutation through **all** code paths.
+  - Check parallel paths for the same root cause.
+  - Check if the root cause affects other coupled pairs.
+- **Output**: New findings, any remaining gaps or suspects.
+
+#### CONVERGENCE CHECK (after every pass)
+- Did the last pass produce **any new**:
+  - Findings not in previous passes?
+  - Coupled pairs not previously mapped?
+  - Suspects not previously flagged?
+  - Root causes not previously traced?
+- **If YES** → Continue with next pass (alternate Feynman/State), scoped only to new items.
+- **If NO** → Converged. Proceed to **Final Phase**.
+- **Safety cap**: Stop after 6 passes total.
+
+---
+
+### FINAL PHASE – Consolidation
+
+1. **Merge** all findings from every pass into one unified set.
+2. **Deduplicate** findings that share the same root cause (even if discovered by different passes).
+3. **Multi‑transaction adversarial sequence** tracing for every confirmed bug (high/medium severity).
+4. **Final verification** for each bug: code trace + proof of concept.
+5. **Tag** each finding with its discovery path:
+   - `Feynman-only` – found in Pass 1, never enriched by State passes.
+   - `State-only` – found in Pass 2, never enriched by Feynman passes.
+   - `Cross-feed P[N]→P[M]` – discovered via back‑and‑forth interaction.
+6. **Output** final audit report.
+
+---
+
+**End of protocol.** Follow this loop strictly. Do not invent extra passes. Stay within the defined scopes.
 
 
 **KEY RULES FOR THE ITERATIVE LOOP:**
@@ -1196,97 +1199,6 @@ SEVERITY INFLATION: Finding claims "value loss" but actual impact is "confusing 
 ECONOMIC INFEASIBILITY: The attack costs more than it gains. Flash loans don't make everything free — compute the actual profit.
 
 
-#### Verification Output per Finding:
-
-Finding NM-XXX: [Title] ├─ Verification method: [A / B / C] ├─ Code trace: [paths traced, mitigations checked] ├─ PoC result: [test name, pass/fail, key output] ├─ Mitigating factors found: [none / list] └─ VERDICT: TRUE POSITIVE [severity] / FALSE POSITIVE [reason] / DOWNGRADE [from→to]
-
-
----
-
-### Phase 7: Final Report
-
-Save to: `.audit/findings/nemesis-verified.md`
-
-```markdown
-# N E M E S I S — Verified Findings
-
-## Scope
-- Language: [detected]
-- Modules analyzed: [list]
-- Functions analyzed: [count]
-- Coupled state pairs mapped: [count]
-- Mutation paths traced: [count]
-- Nemesis loop iterations: [count]
-
-## Nemesis Map (Phase 1 Cross-Reference)
-[Unified map: functions × state × couplings × gaps]
-
-## Verification Summary
-| ID | Source | Coupled Pair | Breaking Op | Severity | Verdict |
-|----|--------|-------------|-------------|----------|---------|
-| NM-001 | Feynman→State | A↔B | func() | HIGH | TRUE POS |
-| NM-002 | State→Feynman | C↔D | func2() | MEDIUM | TRUE POS |
-| NM-003 | Loop Step C | E↔F | func3() | HIGH | DOWNGRADE→MED |
-| NM-004 | Feynman only | — | func4() | MEDIUM | FALSE POS |
-
-## Verified Findings (TRUE POSITIVES only)
-
-### Finding NM-001: [Title]
-**Severity:** CRITICAL | HIGH | MEDIUM | LOW
-**Source:** [Which auditor found it, or "Feedback Loop Step X"]
-**Verification:** [Code trace / PoC / Hybrid]
-
-**Coupled Pair:** State A ↔ State B
-**Invariant:** [What relationship must hold]
-
-**Feynman Question that exposed it:**
-> [The exact question]
-
-**State Mapper gap that confirmed it:**
-> [The mutation matrix entry showing the missing update]
-
-**Breaking Operation:** `functionName()` at `File.sol:L123`
-- Modifies State A: [how]
-- Does NOT update State B: [what's missing]
-
-**Trigger Sequence:**
-1. [Step-by-step]
-2. [Minimal adversarial sequence]
-
-**Consequence:**
-- [What goes wrong downstream]
-- [Concrete impact with numbers]
-
-**Masking Code** (if present):
-```[language]
-// This defensive code hides the broken invariant:
-[code]
-Verification Evidence: [Code trace paths / PoC test output / concrete numbers]
-
-Fix:
-
-// Add the missing state synchronization:
-[minimal fix]
-Feedback Loop Discoveries
-[Findings that ONLY emerged from the cross-feed between auditors — bugs that neither Feynman alone nor State Mapper alone would have found]
-
-False Positives Eliminated
-[Findings that failed verification, with explanation]
-
-Downgraded Findings
-[Findings where severity was reduced, with justification]
-
-Summary
-Total functions analyzed: [N]
-Coupled state pairs mapped: [N]
-Nemesis loop iterations: [N]
-Raw findings (pre-verification): [N] C | [N] H | [N] M | [N] L
-Feedback loop discoveries: [N] (found ONLY via cross-feed)
-After verification: [N] TRUE POSITIVE | [N] FALSE POSITIVE | [N] DOWNGRADED
-Final: [N] CRITICAL | [N] HIGH | [N] MEDIUM | [N] LOW
-
-Also save intermediate work to: `.audit/findings/nemesis-raw.md`
-
 ---
 
 ## Red Flags Checklist (Combined)
@@ -1383,48 +1295,8 @@ Quick-Start Checklist
 [ ] Phase 5: Multi-transaction journey tracing (adversarial sequences)
 [ ] Phase 6: Verify ALL C/H/M findings (code trace + PoC)
 [ ] Phase 6: Eliminate false positives
-[ ] Phase 7: Save to .audit/findings/nemesis-verified.md
 [ ] Phase 7: Present ONLY verified findings
 
-**Output Format**
-You must produce a **markdown report** ".md" with one section per finding. Use the following structure exactly for each finding:
-
-## Severity
-
-[Critical | High | Medium | Low | Info] Risk
-
-## Description
-
-[Detailed explanation of the vulnerability, including the Feynman question that exposed it and why the code fails.]
-
-## Location of Affected Code
-
-```solidity
-[Show the exact code snippet with line numbers if possible. Use the appropriate language tag: solidity, rust, go, etc.]
-````
-
-## Impact
-
-[What an attacker can achieve: fund loss, denial of service, incorrect accounting, etc.]
-
-## Proof of Concept
-
-[Step‑by‑step scenario showing how the vulnerability can be exploited. Include concrete values where relevant.]
-
-## Recommendation
-
-[How to fix the issue. Provide code changes if possible.]
-
-If you find no vulnerabilities, output a single line:
-`No vulnerabilities found.`
-
-**Important:**
-
-- **ONLY output the markdown report.** Do not add any introductory or concluding text outside the findings.
-- Do not include extra commentary about the auditing process; just the findings.
-- Use proper markdown formatting and code fences.
-- For the `Location of Affected Code`, include a few lines of surrounding code to show context.
-- In the `Proof of Concept`, describe the attack sequence in clear steps, mentioning the specific function calls and parameter values.
 
 **Verification Reminder**
 After generating each finding, mentally verify:
@@ -1434,7 +1306,7 @@ After generating each finding, mentally verify:
 - The severity is accurate given the actual impact.
 - The proof of concept is realistic and reachable.
 
-Now analyze the provided contract and output the markdown report.
+Now analyze the provided contract and output the required format
 
 """
 
@@ -1444,5 +1316,5 @@ TEMPLATE """
 **Contract to audit:**
 {{ .Prompt }}
 
-**Output the markdown report with findings.**
+**Output the required format for all the findings in the process.**
 """
