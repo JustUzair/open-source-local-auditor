@@ -15,8 +15,8 @@ data/ingest-checkpoint.json
 
 # OS
 .DS_Store
+*/.DS_Store
 *.log
 
 
 prompts/
-idea/
