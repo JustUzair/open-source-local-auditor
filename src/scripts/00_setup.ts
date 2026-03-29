@@ -1,7 +1,23 @@
+/**
+ * 00_setup.ts — SentinelAI Setup Orchestrator
+ *
+ * Single command that gets everything ready:
+ *   1. Check .env exists and is valid
+ *   2. Check solodit_content submodule is hydrated
+ *   3. Check / build the vector store:
+ *        --download  → fetch pre-built index from GitHub Releases
+ *        (default)   → run ingest + cluster from submodule data
+ *
+ * Usage:
+ *   npm run setup                  — full setup
+ *   npm run setup -- --download    — download pre-built index
+ *   npm run setup -- --fresh       — force rebuild even if index exists
+ */
+
 import { existsSync } from "fs";
-import { copyFile, readFile, writeFile } from "fs/promises";
+import { copyFile } from "fs/promises";
 import { join } from "path";
-import { execSync, spawnSync } from "child_process";
+import { spawnSync } from "child_process";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -12,9 +28,9 @@ const DOWNLOAD_MODE = args.includes("--download");
 const FRESH_MODE = args.includes("--fresh");
 
 /**
- * GitHub Releases URL for the pre-built vector store.
- * Update this when a new release with pre-built data is published.
- * Set to empty string until the first release is published.
+ * GitHub Releases URL for the pre-built vector store archive.
+ * Set this in .env as PREBUILT_INDEX_URL once a release is published.
+ * Leave empty to always build locally.
  */
 const PREBUILT_INDEX_URL = process.env.PREBUILT_INDEX_URL ?? "";
 
@@ -23,17 +39,17 @@ const PREBUILT_INDEX_URL = process.env.PREBUILT_INDEX_URL ?? "";
 function step(emoji: string, message: string): void {
   console.log(`\n${emoji}  ${message}`);
 }
-
 function ok(message: string): void {
   console.log(`   ✅  ${message}`);
 }
-
 function skip(message: string): void {
   console.log(`   ⏭️   ${message}`);
 }
-
 function info(message: string): void {
   console.log(`   ℹ️   ${message}`);
+}
+function warn(message: string): void {
+  console.log(`   ⚠️   ${message}`);
 }
 
 function run(script: string, extraArgs: string[] = []): boolean {
@@ -44,7 +60,7 @@ function run(script: string, extraArgs: string[] = []): boolean {
   return result.status === 0;
 }
 
-// ─── Checks ───────────────────────────────────────────────────────────────────
+// ─── Step 1: Environment Check ────────────────────────────────────────────────
 
 async function checkEnv(): Promise<void> {
   step("🔧", "Checking environment configuration");
@@ -54,12 +70,12 @@ async function checkEnv(): Promise<void> {
       await copyFile(".env.example", ".env");
       console.log("\n   📄  .env created from .env.example");
       console.log(
-        "   ⚠️   Please set your API keys in .env, then re-run setup.\n",
+        "   ⚠️   Please review .env and set any required API keys, then re-run setup.\n",
       );
       process.exit(0);
     } else {
       console.error(
-        "   ❌  .env.example not found. Is this the right directory?\n",
+        "   ❌  .env.example not found. Are you in the project root?\n",
       );
       process.exit(1);
     }
@@ -67,18 +83,73 @@ async function checkEnv(): Promise<void> {
 
   ok(".env found");
 
-  // Validate env by importing (triggers Zod validation)
+  // Trigger Zod validation
   try {
     const { env } = await import("../utils/env.js");
-    void env.NODE_ENV; // trigger validation
+    void env.NODE_ENV;
     ok(`Auditor 1: ${env.AUDITOR_1_PROVIDER}/${env.AUDITOR_1_MODEL}`);
+    ok(`Auditor 2: ${env.AUDITOR_2_PROVIDER}/${env.AUDITOR_2_MODEL}`);
+    ok(`Auditor : ${env.AUDITOR_3_PROVIDER}/${env.AUDITOR_3_MODEL}`);
     ok(`Supervisor: ${env.SUPERVISOR_PROVIDER}/${env.SUPERVISOR_MODEL}`);
     ok(`Embeddings: ${env.EMBEDDING_PROVIDER}/${env.EMBEDDING_MODEL}`);
+
+    // Warn if using ollama embeddings but Ollama isn't running
+    if (env.EMBEDDING_PROVIDER === "ollama") {
+      const ping = spawnSync("curl", [
+        "-sf",
+        `${env.OLLAMA_BASE_URL}/api/tags`,
+      ]);
+      if (ping.status !== 0) {
+        warn(`Ollama doesn't appear to be running at ${env.OLLAMA_BASE_URL}`);
+        warn(`Start it with: ollama serve`);
+        warn(
+          `Then pull the embedding model: ollama pull ${env.EMBEDDING_MODEL}`,
+        );
+      } else {
+        ok(`Ollama reachable at ${env.OLLAMA_BASE_URL}`);
+      }
+    }
   } catch (err) {
     console.error("\n", (err as Error).message);
     process.exit(1);
   }
 }
+
+// ─── Step 2: Submodule Check ──────────────────────────────────────────────────
+
+async function checkSubmodule(): Promise<void> {
+  step("📚", "Checking solodit_content submodule");
+
+  const reportsDir = join(DATA_DIR, "solodit_content", "reports");
+
+  if (existsSync(reportsDir)) {
+    // Count firm folders as a quick sanity check
+    const { readdirSync } = await import("fs");
+    try {
+      const firms = readdirSync(reportsDir);
+      ok(`solodit_content hydrated — ${firms.length} audit firm folders found`);
+      return;
+    } catch {
+      // Fall through to hydrate
+    }
+  }
+
+  // Not hydrated — run npm run hydrate
+  info("solodit_content not found. Hydrating submodule...");
+  const result = spawnSync("npm", ["run", "hydrate"], { stdio: "inherit" });
+
+  if (result.status !== 0) {
+    console.error(
+      "\n   ❌  Submodule hydration failed.\n" +
+        "   Try manually: git submodule update --init --recursive\n",
+    );
+    process.exit(1);
+  }
+
+  ok("solodit_content submodule hydrated");
+}
+
+// ─── Step 3: Vector Store ─────────────────────────────────────────────────────
 
 async function checkVectorStore(): Promise<boolean> {
   const indexPath = join(DATA_DIR, "vectorstore", "hnswlib.index");
@@ -90,15 +161,14 @@ async function downloadPrebuiltIndex(): Promise<void> {
 
   if (!PREBUILT_INDEX_URL) {
     console.error(
-      "   ❌  No pre-built index URL configured.\n" +
-        "   Set PREBUILT_INDEX_URL in .env, or run without --download to build locally.\n",
+      "   ❌  PREBUILT_INDEX_URL not set in .env.\n" +
+        "   Run without --download to build locally from the submodule.\n",
     );
     process.exit(1);
   }
 
-  // Use curl or wget to download the tar.gz and extract it
   const outPath = join(DATA_DIR, "vectorstore.tar.gz");
-  info(`Downloading from: ${PREBUILT_INDEX_URL}`);
+  info(`URL: ${PREBUILT_INDEX_URL}`);
 
   const curl = spawnSync("curl", ["-L", "-o", outPath, PREBUILT_INDEX_URL], {
     stdio: "inherit",
@@ -106,7 +176,7 @@ async function downloadPrebuiltIndex(): Promise<void> {
 
   if (curl.status !== 0) {
     console.error(
-      "   ❌  Download failed. Check the URL and your internet connection.\n",
+      "   ❌  Download failed. Check the URL and your connection.\n",
     );
     process.exit(1);
   }
@@ -122,55 +192,45 @@ async function main(): Promise<void> {
   console.log("\n🛡️   SentinelAI — Setup\n");
   console.log("══════════════════════════════════════════");
 
-  // Step 1: Environment
+  // 1. Environment
   await checkEnv();
 
-  // Step 2: Vector store
-  step("📦", "Checking vector store");
+  // 2. Submodule (always check — data source for ingest)
+  await checkSubmodule();
 
+  // 3. Vector store
+  step("📦", "Checking vector store");
   const storeExists = await checkVectorStore();
 
   if (storeExists && !FRESH_MODE) {
-    skip("Pre-built index found. Skipping ingest.");
-    info("To rebuild: npm run setup -- --fresh");
+    skip("Vector index found. Skipping ingest.");
+    info("To rebuild from latest submodule data: npm run setup -- --fresh");
   } else if (DOWNLOAD_MODE) {
     await downloadPrebuiltIndex();
   } else {
-    // Build from scratch
-    step("🕷️ ", "Scraping Solodit vulnerability database");
-    const rawDir = join(DATA_DIR, "raw");
-    if (existsSync(rawDir) && !FRESH_MODE) {
-      skip("Raw data already scraped. Skipping.");
-      info("To re-scrape: delete data/raw/ and re-run");
-    } else {
-      const scraped = run("src/scripts/01_scrape.ts");
-      if (!scraped) {
-        console.error(
-          "   ❌  Scraping failed. Check your network connection.\n",
-        );
-        process.exit(1);
-      }
-    }
+    // Build from scratch using submodule data
 
-    step("📥", "Ingesting findings into vector store");
+    step("📥", "Ingesting Solodit audit reports into vector store");
     const extraArgs = FRESH_MODE ? ["--fresh"] : [];
-    const ingested = run("src/scripts/02_ingest.ts", extraArgs);
+    const ingested = run("src/scripts/01_ingest.ts", extraArgs);
     if (!ingested) {
       console.error(
         "   ❌  Ingest failed.\n" +
-          "   If it was a rate limit, run: npm run ingest (it will resume)\n",
+          "   To resume: npm run ingest\n" +
+          "   To rebuild: npm run ingest -- --fresh\n",
       );
       process.exit(1);
     }
 
     step("🔵", "Running k-means clustering");
-    const clustered = run("src/scripts/03_cluster.ts");
+    const clustered = run("src/scripts/02_cluster.ts");
     if (!clustered) {
       console.error(
         "   ❌  Clustering failed.\n" +
-          "   You can still use the tool — run: npm run cluster to retry\n",
+          "   The tool still works with plain similarity search.\n" +
+          "   Retry: npm run cluster\n",
       );
-      // Non-fatal — tool works with plain similarity search as fallback
+      // Non-fatal — retriever falls back to plain similarity search
     }
   }
 
