@@ -37,7 +37,7 @@ import {
   buildInitialBatches,
   buildNextPassBatches,
 } from "./batcher.js";
-import { fetchClusterDiverseFindings } from "../data/retriever.js";
+// import { fetchClusterDiverseFindings } from "../data/retriever.js";
 import { makeSupervisorModel, buildAuditorModel } from "../utils/models.js";
 import { invokeWithSchema, extractJSON } from "../utils/llm.js";
 import { parseAuditorOutput } from "../utils/llm.js";
@@ -64,6 +64,7 @@ import type {
   AgentResult,
 } from "../types/audit.js";
 import { SupervisorOutputSchema } from "../types/audit.js";
+import { fetchRelevantFindings } from "../data/retriever.js";
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -113,7 +114,9 @@ export async function runAudit(
 
   // ── Phase 2: RAG Retrieval ─────────────────────────────────────────────
   logger.info("engine", "Phase 2: Fetching RAG context...");
-  const ragContext = await fetchClusterDiverseFindings(currentMap.formatted, 6);
+  //   const ragContext = await fetchClusterDiverseFindings(currentMap.formatted, 6);
+  const ragQuery = buildRagQuery(currentMap, files);
+  const ragContext = await fetchRelevantFindings(ragQuery, 6);
   logger.info(`engine`, `RAG Context\n`, ragContext);
   // ── Phase 3: Iterative Audit Loop ──────────────────────────────────────
   logger.info("engine", "Phase 3: Iterative audit loop...");
@@ -483,7 +486,7 @@ async function runOllamaThinkingCall(
       stream: true,
       options: {
         temperature: 0,
-        num_predict: 32768,
+        num_ctx: 32768,
       },
       messages: [
         { role: "system", content: systemPrompt },
@@ -825,4 +828,17 @@ function logAuditorCallResult(
         result.rawResponse.slice(0, 300),
     );
   }
+}
+
+function buildRagQuery(map: ProtocolMap, files: SourceFile[]): string {
+  // Extract just the entry points + what they touch from the map summary
+  const summary = map.formatted.slice(0, 3000);
+  // Add the top-scoring file's function signatures for specificity
+  const topFile = [...files].sort((a, b) => b.attackScore - a.attackScore)[0];
+  const fnSigs =
+    topFile?.content
+      .match(/function \w+\([^)]*\)[^{]*/g)
+      ?.slice(0, 10)
+      .join("\n") ?? "";
+  return `${summary}\n\nKey functions:\n${fnSigs}`;
 }

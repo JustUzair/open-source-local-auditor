@@ -15,21 +15,31 @@ export interface ClusterCentroid {
   size: number;
 }
 
-export async function fetchClusterDiverseFindings(
+// export async function fetchClusterDiverseFindings(
+//   queryText: string,
+//   k: number = 6,
+// ): Promise<string> {
+//   const store = await getVectorStore();
+//   const centroids = await loadCentroids();
+
+//   if (centroids.length > 0)
+//     return clusterAwareSearch(store, queryText, centroids, k);
+
+//   logger.warn(
+//     "retriever",
+//     "Cluster data not found — using plain similarity search.",
+//   );
+//   return plainSearch(store, queryText, k);
+// }
+export async function fetchRelevantFindings(
   queryText: string,
-  k: number = 6,
+  k: number = 8,
 ): Promise<string> {
   const store = await getVectorStore();
-  const centroids = await loadCentroids();
-
-  if (centroids.length > 0)
-    return clusterAwareSearch(store, queryText, centroids, k);
-
-  logger.warn(
-    "retriever",
-    "Cluster data not found — using plain similarity search.",
-  );
-  return plainSearch(store, queryText, k);
+  // Trim to the most signal-dense part of the protocol map:
+  // function names, state vars, value flows — first ~2000 chars is usually best
+  const query = queryText.slice(0, 3000);
+  return plainSearch(store, query, k);
 }
 
 async function clusterAwareSearch(
