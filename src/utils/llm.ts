@@ -129,9 +129,11 @@ export async function invokeWithSchema<T>(opts: {
  * Extract and parse JSON from an LLM response that may contain:
  * - Preamble text before the JSON
  * - Markdown code fences (```json ... ``` or ``` ... ```)
+ * - Analysis text with brackets (e.g. "balances[addr]", "step [1]")
+ * - Extended thinking blocks from Qwen3.5 / other models
  * - Postamble text after the JSON
  *
- * Three strategies, each tried in sequence. Throws if all fail.
+ * Four strategies, each tried in sequence. Throws if all fail.
  */
 export function extractJSON(text: string): unknown {
   const t = text.trim();
@@ -149,12 +151,35 @@ export function extractJSON(text: string): unknown {
     } catch {}
   }
 
-  // Strategy 3: extract first {...} or [...] block (LLM added surrounding text)
-  const blockMatch = t.match(/(\{[\s\S]*\}|\[[\s\S]*\])/s);
-  if (blockMatch?.[1]) {
+  // Strategy 3: search RIGHT-TO-LEFT for the last JSON array or object.
+  //
+  // WHY: The old greedy regex (\[[\s\S]*\]) starts from the FIRST '[' in the
+  // text. When the model emits analysis text before the JSON (e.g. thinking
+  // blocks, step-by-step reasoning, or code references like balances[addr]),
+  // the first '[' is in prose, not in the JSON. The greedy match then captures
+  // everything from that prose bracket to the last ']', producing garbage.
+  //
+  // Searching from right-to-left (lastIndexOf) finds the LAST '[' in the text,
+  // which is almost always the opening bracket of the actual findings array.
+  // We try slicing from that position and parsing. If it fails (e.g. the last
+  // '[' is a nested bracket inside the array), we walk left and try again.
+
+  // Try arrays: last '[' first, walk left until one parses
+  let arrayStart = t.lastIndexOf("[");
+  while (arrayStart >= 0) {
     try {
-      return JSON.parse(blockMatch[1]);
+      return JSON.parse(t.slice(arrayStart));
     } catch {}
+    arrayStart = t.lastIndexOf("[", arrayStart - 1);
+  }
+
+  // Try objects: last '{' first, walk left
+  let objectStart = t.lastIndexOf("{");
+  while (objectStart >= 0) {
+    try {
+      return JSON.parse(t.slice(objectStart));
+    } catch {}
+    objectStart = t.lastIndexOf("{", objectStart - 1);
   }
 
   throw new Error(
@@ -214,6 +239,11 @@ If you find no issues, respond with: {"findings": []}
  *   SUSPICIONS:
  *   [{...suspicion1}]
  *
+ * Models with extended thinking (Qwen3.5, etc.) may prefix this with
+ * <think>...</think> blocks containing their reasoning. These MUST be
+ * stripped before JSON extraction — they contain brackets and braces
+ * from code analysis that corrupt any regex-based JSON finder.
+ *
  * Split on "SUSPICIONS:", parse each part as a JSON array,
  * validate each element against the appropriate Zod schema.
  * Invalid elements are silently dropped — partial results beat total failure.
@@ -222,11 +252,17 @@ export function parseAuditorOutput(raw: string): {
   findings: Finding[];
   suspicions: Omit<SuspicionNote, "auditorId" | "passNumber">[];
 } {
-  const splitIdx = raw.indexOf("SUSPICIONS:");
+  // Strip extended thinking blocks FIRST.
+  // Qwen3.5 (and other reasoning models) wrap chain-of-thought in <think>...</think>.
+  // These blocks contain brackets from code analysis (e.g. "balances[addr]",
+  // "call graph: A -> [B, C]") that corrupt the JSON extractor if left in place.
+  const stripped = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+
+  const splitIdx = stripped.indexOf("SUSPICIONS:");
   const findingsPart =
-    splitIdx >= 0 ? raw.slice(0, splitIdx).trim() : raw.trim();
+    splitIdx >= 0 ? stripped.slice(0, splitIdx).trim() : stripped.trim();
   const suspicionsPart =
-    splitIdx >= 0 ? raw.slice(splitIdx + "SUSPICIONS:".length).trim() : "";
+    splitIdx >= 0 ? stripped.slice(splitIdx + "SUSPICIONS:".length).trim() : "";
 
   return {
     findings: parseFindingsArray(findingsPart),

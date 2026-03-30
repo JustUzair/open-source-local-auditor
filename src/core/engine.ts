@@ -386,10 +386,16 @@ async function runAuditorCall(
     const rawResponse = extractContentString(response.content);
     const { findings, suspicions } = parseAuditorOutput(rawResponse);
 
+    // For logging: strip thinking blocks so the log shows actual findings,
+    // not thousands of chars of reasoning that obscure the output.
+    const loggableResponse = rawResponse
+      .replace(/<think>[\s\S]*?<\/think>/gi, "[thinking stripped]")
+      .slice(0, 1000);
+
     return {
       findings,
       suspicions,
-      rawResponse,
+      rawResponse: loggableResponse,
       status: findings.length === 0 ? "empty" : "ok",
     };
   } catch (err) {
