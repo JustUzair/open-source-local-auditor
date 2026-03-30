@@ -62,6 +62,8 @@ export async function buildProtocolMap(
   files: SourceFile[],
   config: EngineConfig,
 ): Promise<ProtocolMap> {
+  console.log(`Files`, files.map(file => file.path).join("\n"));
+
   logger.info(
     "cartographer",
     `Building protocol map: ${files.length} file(s) to index`,
