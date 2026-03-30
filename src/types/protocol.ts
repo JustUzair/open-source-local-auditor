@@ -128,7 +128,6 @@ export interface AuditorConfig {
    * "senior": Full Feynman + State Inconsistency dual-pass (deeper, slower).
    * This lets the same base model run different audit depths per auditor slot.
    */
-  role?: "junior" | "senior";
 }
 
 export interface EngineConfig {

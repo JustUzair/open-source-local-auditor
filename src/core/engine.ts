@@ -27,6 +27,8 @@
 
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { ChatOllama } from "@langchain/ollama";
+import { Ollama } from "ollama";
+import ollama from "ollama";
 import { nanoid } from "nanoid";
 import { loadProtocol } from "../data/loader.js";
 import { buildProtocolMap, injectSuspicions } from "./cartographer.js";
@@ -172,72 +174,127 @@ export async function runAudit(
         config.thinkingEnabled,
       );
 
-      const prompt = buildAuditPrompt(
+      const guidedPrompt = buildAuditPrompt(
         currentMap,
         ragContext,
         batch,
         passNumber,
+        "guided",
+      );
+      const blindPrompt = buildAuditPrompt(
+        currentMap,
+        ragContext,
+        batch,
+        passNumber,
+        "blind",
+      );
+
+      logger.debug(
+        `engine`,
+        `Batch ${batch.batchId} prompt (guided)\n`,
+        guidedPrompt,
+      );
+
+      logger.debug(
+        `engine`,
+        `Batch ${batch.batchId} prompt (blind)\n`,
+        blindPrompt,
       );
 
       for (const auditorCfg of config.auditors) {
-        logger.debug(
-          "engine",
-          `Running auditor ${auditorCfg.id} [${auditorCfg.role ?? "junior"}] ` +
-            `on batch ${batch.batchId} ` +
-            `(${batch.fullFiles.length} files, thinking: ${thinkingOn}, ` +
-            `provider: ${auditorCfg.provider}, ` +
-            `url: ${auditorCfg.ollamaBaseUrl ?? env.OLLAMA_BASE_URL})`,
-        );
-        const callResult = await runAuditorCall(auditorCfg, prompt, thinkingOn);
+        // ── Run A: Guided (with RAG reference) ──────────────────────────────
         logger.info(
-          `engine`,
-          `Auditor ${auditorCfg.id} call result: ${callResult.status}`,
-          callResult,
+          "engine",
+          `  ${auditorCfg.id} [guided]: ${batch.fullFiles.length} files, thinking: ${thinkingOn}`,
+        );
+        const guidedResult = await runAuditorCall(
+          auditorCfg,
+          guidedPrompt,
+          thinkingOn,
         );
 
-        const agentResult: AgentResult = {
-          auditorId: auditorCfg.id,
+        // ── Run B: Blind (no RAG) ────────────────────────────────────────────
+        // Blind run never uses thinking — the reasoning budget is better spent on
+        // a fresh independent pass than extended chain-of-thought on the same files.
+        logger.info(
+          "engine",
+          `  ${auditorCfg.id} [blind]:  ${batch.fullFiles.length} files, thinking: ${true}`,
+        );
+        const blindResult = await runAuditorCall(auditorCfg, blindPrompt, true);
+
+        logAuditorCallResult(auditorCfg.id, "guided", guidedResult);
+        logAuditorCallResult(auditorCfg.id, "blind", blindResult);
+
+        // ── Merge both runs into one AuditorResult ───────────────────────────
+        const combinedFindings = [
+          ...guidedResult.findings,
+          ...blindResult.findings,
+        ];
+
+        const agentResultGuided: AgentResult = {
+          auditorId: `${auditorCfg.id}-guided`,
           agentRole: "logical-bugs",
           model: auditorCfg.model,
-          status: callResult.status,
-          findings: callResult.findings,
-          error: callResult.error,
-          rawResponse: callResult.rawResponse.slice(0, 1000),
+          status: guidedResult.status,
+          findings: guidedResult.findings,
+          error: guidedResult.error,
+          rawResponse: guidedResult.rawResponse.slice(0, 1000),
+          thinkingContent: guidedResult.thinkingContent,
+        };
+
+        const agentResultBlind: AgentResult = {
+          auditorId: `${auditorCfg.id}-blind`,
+          agentRole: "contextual",
+          model: auditorCfg.model,
+          status: blindResult.status,
+          findings: blindResult.findings,
+          error: blindResult.error,
+          rawResponse: blindResult.rawResponse.slice(0, 1000),
+          thinkingContent: blindResult.thinkingContent,
         };
 
         logger.info(
-          `engine`,
-          `Auditor ${auditorCfg.id} agent result: ${agentResult.status}\n`,
-          agentResult,
+          "engine",
+          `(((:::::)))agentResultGuided\n`,
+          agentResultGuided,
+        );
+        logger.info(
+          "engine",
+          `(((:::::)))agentResultBlind\n`,
+          agentResultBlind,
         );
 
         const auditorResult: AuditorResult = {
           auditorId: auditorCfg.id,
           model: auditorCfg.model,
-          agents: [agentResult],
-          allFindings: callResult.findings,
+          agents: [agentResultGuided, agentResultBlind],
+          allFindings: combinedFindings,
         };
-
-        logger.info(
-          `engine`,
-          `Auditor ${auditorCfg.id} findings: ${callResult.findings.length}\n`,
-          auditorResult,
-        );
 
         allAuditorResults.push(auditorResult);
 
-        // Tag suspicions with auditor id and pass number
-        const taggedSuspicions: SuspicionNote[] = callResult.suspicions.map(
-          s => ({ ...s, auditorId: auditorCfg.id, passNumber }),
+        // Suspicions from both runs — both can flag cross-file leads
+        const taggedGuided: SuspicionNote[] = guidedResult.suspicions.map(
+          s => ({
+            ...s,
+            auditorId: `${auditorCfg.id}-guided`,
+            passNumber,
+          }),
         );
+        const taggedBlind: SuspicionNote[] = blindResult.suspicions.map(s => ({
+          ...s,
+          auditorId: `${auditorCfg.id}-blind`,
+          passNumber,
+        }));
 
-        allSuspicionNotes.push(...taggedSuspicions);
-        passNewSuspicions.push(...taggedSuspicions);
+        allSuspicionNotes.push(...taggedGuided, ...taggedBlind);
+        passNewSuspicions.push(...taggedGuided, ...taggedBlind);
 
         logger.info(
           "engine",
-          `  ${auditorCfg.id}: ${callResult.findings.length} finding(s), ` +
-            `${callResult.suspicions.length} suspicion(s)`,
+          `  ${auditorCfg.id}: guided=${guidedResult.findings.length} + ` +
+            `blind=${blindResult.findings.length} = ${combinedFindings.length} finding(s), ` +
+            `${taggedGuided.length + taggedBlind.length} suspicion(s)`,
         );
       }
 
@@ -333,6 +390,7 @@ interface AuditorCallResult {
   findings: Finding[];
   suspicions: Omit<SuspicionNote, "auditorId" | "passNumber">[];
   rawResponse: string;
+  thinkingContent: string; // the <think> block, stored separately for debug
   status: "ok" | "failed" | "empty";
   error?: string;
 }
@@ -340,45 +398,31 @@ interface AuditorCallResult {
 /**
  * Run one auditor call against a batch.
  *
- * KEY DESIGN:
- * - Uses buildAuditorModel() → supports ANY provider (ollama/anthropic/openai/gemini/groq)
- * - Injects the system prompt as a SystemMessage → same behaviour regardless of whether
- *   the model was created from a Modelfile or is a raw cloud model
- * - For Ollama: if thinkingEnabled, rebuilds the model and
- *   options.think:true — this is Ollama-specific and skipped for cloud providers
- * - For cloud providers (Claude, GPT, Gemini): thinkingEnabled increases maxTokens
- *   but doesn't activate model-specific thinking modes (those require separate API flags)
+ * TWO PATHS:
  *
- * MULTI-MACHINE:
- * - auditorCfg.ollamaBaseUrl routes this specific auditor to its assigned machine
- * - auditor-1 → localhost:11434 (Mac), auditor-2 → 192.168.0.200:11434 (network box)
- * - Both see the SAME prompt, SAME system prompt, SAME RAG context
+ * 1. Ollama + thinkingEnabled → use native ollama SDK with stream:true
+ *    This correctly separates chunk.message.thinking from chunk.message.content.
+ *    The thinking text is captured separately and NEVER fed into parseAuditorOutput.
+ *    We stream-print the thinking in real time to the CLI (disappears after, like Claude).
+ *
+ * 2. Everything else (cloud providers, or Ollama without thinking) → use LangChain
+ *    model.invoke() as before. No change.
  */
 async function runAuditorCall(
   auditorCfg: AuditorConfig,
   prompt: string,
   thinkingEnabled: boolean,
 ): Promise<AuditorCallResult> {
-  // Pick the right system prompt based on role
   const systemPrompt = AUDITOR_SYSTEM;
 
+  // ── Path 1: Ollama native SDK with thinking ────────────────────────────
+  if (thinkingEnabled && auditorCfg.provider === "ollama") {
+    return runOllamaThinkingCall(auditorCfg, systemPrompt, prompt);
+  }
+
+  // ── Path 2: LangChain (all cloud providers + Ollama without thinking) ──
   try {
-    let model = buildAuditorModel(auditorCfg, 0.05);
-
-    // Thinking mode: Ollama-specific adjustments
-    // Cloud providers handle generation length differently (maxTokens in buildModel)
-    if (thinkingEnabled && auditorCfg.provider === "ollama") {
-      const ollamaUrl = auditorCfg.ollamaBaseUrl ?? env.OLLAMA_BASE_URL;
-      model = new ChatOllama({
-        model: auditorCfg.model,
-        baseUrl: ollamaUrl,
-        temperature: 0,
-        think: true,
-        streaming: false,
-        
-      });
-    }
-
+    const model = buildAuditorModel(auditorCfg, 0.05);
     const response = await model.invoke([
       new SystemMessage(systemPrompt),
       new HumanMessage(prompt),
@@ -387,16 +431,11 @@ async function runAuditorCall(
     const rawResponse = extractContentString(response.content);
     const { findings, suspicions } = parseAuditorOutput(rawResponse);
 
-    // For logging: strip thinking blocks so the log shows actual findings,
-    // not thousands of chars of reasoning that obscure the output.
-    const loggableResponse = rawResponse
-      .replace(/<think>[\s\S]*?<\/think>/gi, "[thinking stripped]")
-      .slice(0, 1000);
-
     return {
       findings,
       suspicions,
-      rawResponse: loggableResponse,
+      rawResponse,
+      thinkingContent: "",
       status: findings.length === 0 ? "empty" : "ok",
     };
   } catch (err) {
@@ -406,6 +445,98 @@ async function runAuditorCall(
       findings: [],
       suspicions: [],
       rawResponse: "",
+      thinkingContent: "",
+      status: "failed",
+      error,
+    };
+  }
+}
+
+/**
+ * Ollama native streaming call with thinking mode.
+ *
+ * Uses the ollama npm package directly (not LangChain) to correctly separate
+ * thinking tokens from content tokens. LangChain's ChatOllama concatenates them,
+ * which breaks JSON parsing.
+ *
+ * Streams thinking to stdout in real time with a dim prefix so you can watch
+ * the model reason. The thinking block disappears from the final output — only
+ * the content JSON is passed to parseAuditorOutput.
+ */
+async function runOllamaThinkingCall(
+  auditorCfg: AuditorConfig,
+  systemPrompt: string,
+  prompt: string,
+): Promise<AuditorCallResult> {
+  const ollamaUrl = auditorCfg.ollamaBaseUrl ?? env.OLLAMA_BASE_URL;
+  const ollamaClient = new Ollama({ host: ollamaUrl });
+
+  let thinkingContent = "";
+  let contentText = "";
+  let inThinking = false;
+  let thinkingStarted = false;
+
+  try {
+    const stream = await ollamaClient.chat({
+      model: auditorCfg.model,
+      think: true,
+      stream: true,
+      options: {
+        temperature: 0,
+        num_predict: 32768,
+      },
+      messages: [
+        { role: "system", content: systemPrompt },
+        { role: "user", content: prompt },
+      ],
+    });
+
+    // Stream thinking to CLI in real time — dim/grey prefix so it's visually
+    // distinct from normal output and clearly marked as thinking
+    for await (const chunk of stream) {
+      if (chunk.message.thinking) {
+        if (!thinkingStarted) {
+          process.stdout.write(`\n\x1b[2m[${auditorCfg.id} thinking]\x1b[0m\n`);
+          thinkingStarted = true;
+          inThinking = true;
+        }
+
+        thinkingContent += chunk.message.thinking;
+        // Write without newline to keep thinking text flowing
+        process.stdout.write(chunk.message.thinking);
+      } else if (chunk.message.content) {
+        if (inThinking) {
+          // Thinking ended — print separator and move to content
+          process.stdout.write(
+            `\n\x1b[2m[${auditorCfg.id} thinking complete — ${thinkingContent.length} chars]\x1b[0m\n\n`,
+          );
+          inThinking = false;
+        }
+        contentText += chunk.message.content;
+      }
+    }
+
+    const { findings, suspicions } = parseAuditorOutput(contentText);
+
+    return {
+      findings,
+      suspicions,
+      rawResponse: contentText, // ONLY the content, not the thinking
+      thinkingContent, // stored separately in debug
+      status: findings.length === 0 ? "empty" : "ok",
+    };
+  } catch (err) {
+    const error = (err as Error).message;
+    logger.error(
+      "engine",
+      `Auditor ${auditorCfg.id} (thinking mode) call failed`,
+      { error },
+    );
+    return {
+      findings: [],
+      suspicions: [],
+      rawResponse: "",
+      thinkingContent: "",
       status: "failed",
       error,
     };
@@ -475,17 +606,55 @@ async function runSupervisor(
 
 // ─── Prompt Builder ───────────────────────────────────────────────────────────
 
+/**
+ * Build the audit prompt for a given batch and run type.
+ *
+ * RUN TYPE "guided":
+ *   Includes the RAG section framed as "similar patterns to watch for"
+ *   — not "these are the only bugs". The framing matters enormously.
+ *   The model should use RAG as hints, not constraints.
+ *
+ * RUN TYPE "blind":
+ *   No RAG section at all. Pure reasoning from the code + Protocol Map.
+ *   The model has no anchoring bias from historical patterns.
+ *   Often catches bugs the guided run misses because it's not
+ *   pattern-matching against the RAG clusters.
+ *
+ * Both runs see the same Protocol Map (global codebase awareness).
+ * Both run the same system prompt methodology.
+ * The supervisor deduplicates and merges findings from both.
+ */
 function buildAuditPrompt(
   map: ProtocolMap,
   ragContext: string,
   batch: AuditBatch,
   passNumber: number,
+  runType: "guided" | "blind" = "guided",
 ): string {
-  const sections: string[] = [
-    `=== PROTOCOL MAP ===\n${map.formatted}`,
-    `=== HISTORICAL VULNERABILITY PATTERNS (Solodit RAG) ===\n${ragContext}`,
-  ];
+  const sections: string[] = [`=== PROTOCOL MAP ===\n${map.formatted}`];
 
+  // ── RAG section — guided run only ──────────────────────────────────────
+  if (runType === "guided") {
+    sections.push(
+      `=== SIMILAR VULNERABILITY PATTERNS (Reference Only) ===\n` +
+        `The following are examples of bugs found in similar protocols.\n` +
+        `Use these as a REFERENCE and INSPIRATION — not as a checklist.\n` +
+        `The actual bugs in this codebase may be completely different.\n` +
+        `Do NOT limit your findings to these categories.\n\n` +
+        ragContext,
+    );
+  } else {
+    // Blind run — explicitly tell model there's no reference material
+    sections.push(
+      `=== BLIND AUDIT — NO REFERENCE PATTERNS ===\n` +
+        `This is an independent audit pass with no historical reference patterns.\n` +
+        `Reason entirely from the code. Find bugs the reference-guided pass might miss.\n` +
+        `Be especially attentive to: business logic, state invariants, token accounting,\n` +
+        `access control asymmetries, and protocol-specific edge cases.`,
+    );
+  }
+
+  // ── Suspicion focus block (re-audit passes) ────────────────────────────
   if (batch.isSuspicionReaudit && batch.triggeringSuspicions.length > 0) {
     const focusBlock = batch.triggeringSuspicions
       .map(
@@ -634,8 +803,26 @@ function logAuditorConfig(config: EngineConfig): void {
     logger.info(
       "engine",
       `  ${a.id}: provider=${a.provider} model=${a.model} ` +
-        `role=${a.role ?? "junior"} ` +
         `url=${a.provider === "ollama" ? (a.ollamaBaseUrl ?? env.OLLAMA_BASE_URL) : "cloud"}`,
+    );
+  }
+}
+
+function logAuditorCallResult(
+  auditorId: string,
+  runType: "guided" | "blind",
+  result: AuditorCallResult,
+): void {
+  logger.info(
+    "engine",
+    `Auditor ${auditorId} [${runType}] result: ${result.status} — ` +
+      `${result.findings.length} finding(s), ${result.suspicions.length} suspicion(s)`,
+  );
+  if (result.status === "failed" || result.status === "empty") {
+    logger.debug(
+      "engine",
+      `${auditorId} [${runType}] rawResponse preview:\n` +
+        result.rawResponse.slice(0, 300),
     );
   }
 }

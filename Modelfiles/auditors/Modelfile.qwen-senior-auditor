@@ -267,5 +267,8 @@ TEMPLATE """{{ .System }}
 Contract to audit:
 {{ .Prompt }}
 
-Output the full audit report.
+Output the JSON array of findings. Then on the very next line:
+SUSPICIONS:
+[{"targetFile":"...","targetFunction":"...","reason":"concrete code-traceable reason","confidence":0.9}]
+Or: SUSPICIONS: [] if none. Only emit suspicions confidence >= 0.7 with a CONCRETE reason. Never use "could potentially" or "might be".
 """

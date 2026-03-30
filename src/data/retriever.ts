@@ -6,6 +6,7 @@ import { getVectorStore } from "./vector-store.js";
 import { makeEmbeddingsModel } from "../utils/models.js";
 import { env } from "../utils/env.js";
 import { logger } from "../utils/logger.js";
+import { HNSWLib } from "@langchain/community/vectorstores/hnswlib";
 
 export interface ClusterCentroid {
   clusterId: number;
@@ -32,13 +33,13 @@ export async function fetchClusterDiverseFindings(
 }
 
 async function clusterAwareSearch(
-  store: any,
+  store: HNSWLib,
   queryText: string,
   centroids: ClusterCentroid[],
   k: number,
 ): Promise<string> {
   const embeddings = makeEmbeddingsModel();
-  const querySlice = queryText.slice(0, 4000);
+  const querySlice = queryText.slice(0, 6000);
   const queryVector = await embeddings.embedQuery(querySlice);
 
   const scored = centroids
@@ -52,12 +53,13 @@ async function clusterAwareSearch(
 
   const results = await Promise.all(
     scored.map(async ({ clusterId, label }) => {
-      const docs = await store.similaritySearch(
+      // #TODO This needs to be refined as it fetches only generic findings
+      const docs = await store.similaritySearchWithScore(
         querySlice,
-        1,
+        k,
         (doc: Document) => doc.metadata?.clusterId === clusterId,
       );
-      return { clusterId, label, doc: docs[0] ?? null };
+      return { clusterId, label, doc: docs[0]?.[0] ?? null };
     }),
   );
 

@@ -110,6 +110,7 @@ export interface AgentResult {
   error?: string;
   /** Always stored for debugging. Truncated to 1000 chars in logs. */
   rawResponse?: string;
+  thinkingContent?: string;
 }
 
 export interface AuditorResult {

@@ -114,7 +114,6 @@ function buildEngineConfig(): EngineConfig {
         ? (env.AUDITOR_1_API_KEY ?? "")
         : undefined,
     ollamaBaseUrl: env.AUDITOR_1_OLLAMA_URL ?? env.OLLAMA_BASE_URL,
-    role: "senior",
   });
 
   // ── Auditor 2 — optional ──────────────────────────────────────────────
@@ -128,7 +127,6 @@ function buildEngineConfig(): EngineConfig {
           ? (env.AUDITOR_2_API_KEY ?? "")
           : undefined,
       ollamaBaseUrl: env.AUDITOR_2_OLLAMA_URL ?? env.OLLAMA_BASE_URL,
-      role: "senior", // Second local auditor — same methodology, different machine = independent finding
     });
   }
 
@@ -145,7 +143,6 @@ function buildEngineConfig(): EngineConfig {
       ollamaBaseUrl: env.AUDITOR_3_OLLAMA_URL ?? env.OLLAMA_BASE_URL,
       // Auditor 3 is the "senior" — deeper Feynman+Nemesis dual-pass methodology.
       // If using GLM-5 or a cloud model here, it benefits from the richer prompt.
-      role: "senior",
     });
   }
 
@@ -182,7 +179,7 @@ async function main(): Promise<void> {
         ? (a.ollamaBaseUrl ?? env.OLLAMA_BASE_URL)
         : "cloud";
     console.log(
-      `   ${a.id}:        [${a.role ?? "junior"}] ${a.provider}/${a.model} @ ${url}`,
+      `   ${a.id}:        [auditor] ${a.provider}/${a.model} @ ${url}`,
     );
   }
   console.log(`   Context window:   ${config.contextWindow} tokens`);
@@ -251,7 +248,6 @@ async function main(): Promise<void> {
           id: a.id,
           provider: a.provider,
           model: a.model,
-          role: a.role ?? "junior",
           url:
             a.provider === "ollama"
               ? (a.ollamaBaseUrl ?? env.OLLAMA_BASE_URL)

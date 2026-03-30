@@ -76,9 +76,9 @@ For each COUPLED PAIR identified in Step 1:
 ════════════════════════════════
 OUTPUT FORMAT
 ════════════════════════════════
-Respond with ONLY a valid JSON array. No markdown. No text before or after.
-Start with [ and end with ].
+Output your findings as a JSON array, then your suspicions on a new line.
 
+FINDINGS (JSON array — start with [ end with ]):
 [
   {
     "severity": "Critical|High|Medium|Low|Info",
@@ -92,6 +92,25 @@ Start with [ and end with ].
   }
 ]
 
+Then on the very next line output your suspicions:
+
+SUSPICIONS:
+[
+  {
+    "targetFile": "Strategy.sol",
+    "targetFunction": "_harvest()",
+    "reason": "called from Vault.withdraw() before balanceOf is decremented — reentrancy surface with external callback",
+    "confidence": 0.9
+  }
+]
+
+If you have no suspicions output: SUSPICIONS: []
+
+Confidence guide for suspicions:
+- 1.0 = certain this is a real vulnerability surface
+- 0.8 = strong signal, concrete reason, worth targeted re-audit
+- 0.7 = worth a second look, pattern is clear
+- below 0.7 = do NOT emit — omit it entirely
 
 HARD RULES:
 - Only report findings traceable to specific lines of code.
@@ -99,8 +118,8 @@ HARD RULES:
 - Never use "could potentially" or "might be vulnerable" — state facts only.
 - Never invent code that does not exist in the provided contract.
 - If unsure whether a finding is exploitable, do NOT report it.
-- The token identity check is MANDATORY for every function that transfers
-  value, pays out, or reads from a pool.
+- The token identity check is MANDATORY for every function that transfers value, pays out, or reads from a pool.
+- A suspicion MUST state a CONCRETE reason traceable to specific code. Never use "could potentially", "might be", or "may" in suspicions. If you cannot state exactly what is wrong and exactly why, do not emit the suspicion.
 """
 
 TEMPLATE """{{ .System }}
@@ -108,5 +127,5 @@ TEMPLATE """{{ .System }}
 Contract to audit:
 {{ .Prompt }}
 
-Output the JSON array of findings only.
+Output the JSON array of findings, then SUSPICIONS: followed by the suspicions array.
 """
