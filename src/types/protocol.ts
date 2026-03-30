@@ -1,3 +1,5 @@
+import { ProviderName } from "./models";
+
 /**
  * A single source file from the protocol under audit.
  * Language-agnostic — replaces SolidityFile entirely.
@@ -104,3 +106,48 @@ export interface SuspicionNote {
 export type SeenFiles = Set<string>;
 
 export type ProtocolSize = "small" | "medium" | "large";
+
+// ─── Engine Configuration ─────────────────────────────────────────────────────
+
+export interface AuditorConfig {
+  id: string;
+  provider: ProviderName;
+  model: string;
+  apiKey?: string;
+  /**
+   * Per-auditor Ollama instance URL.
+   * Use this for multi-machine setups — e.g., auditor-1 on your Mac
+   * (localhost:11434) and auditor-2 on a network machine (192.168.0.200:11434).
+   * Falls back to OLLAMA_BASE_URL if not set.
+   * Ignored for cloud providers (anthropic, openai, gemini, groq).
+   */
+  ollamaBaseUrl?: string;
+  /**
+   * Auditor role — determines which system prompt constant is used.
+   * "junior" (default): Value store mapping + function interrogation (faster).
+   * "senior": Full Feynman + State Inconsistency dual-pass (deeper, slower).
+   * This lets the same base model run different audit depths per auditor slot.
+   */
+  role?: "junior" | "senior";
+}
+
+export interface EngineConfig {
+  /** Auditor model slots — at least one required. */
+  auditors: AuditorConfig[];
+  /** Context window of the auditor model in tokens. Default: 32768 for Qwen3.5 9B. */
+  contextWindow: number;
+  /** Maximum audit passes before forced stop. Default: 3. */
+  maxAuditPasses: number;
+  /**
+   * Minimum confidence for a suspicion note to propagate to the next pass.
+   * 0.7 = concrete lead, reasonably sure. Below this = noise, don't chase it.
+   */
+  minSuspicionConfidence: number;
+  /** Max files at full content per batch. Safety cap. Default: 10. */
+  maxFullFilesPerBatch: number;
+  /**
+   * Global switch for Qwen3.5 extended thinking (chain-of-thought reasoning tokens).
+   * Engine enables thinking selectively per-call even when this is true.
+   */
+  thinkingEnabled: boolean;
+}
