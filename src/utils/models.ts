@@ -15,6 +15,7 @@ import type {
 } from "../types/models.js";
 import { env } from "./env.js";
 import { logger } from "./logger.js";
+import type { AuditorConfig } from "../types/protocol.js";
 
 // ─── Chat Model Builder ───────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ export function buildModel(
   slot: ModelSlotConfig,
   temperature: number,
   OLLAMA_BASE_URL: string = env.OLLAMA_BASE_URL,
+  maxTokens: number = 4096,
 ): BaseChatModel {
   const { provider, model, apiKey } = slot;
 
@@ -39,7 +41,7 @@ export function buildModel(
         model,
         apiKey,
         temperature,
-        maxOutputTokens: 4096,
+        maxOutputTokens: maxTokens,
       });
 
     case "groq":
@@ -47,7 +49,7 @@ export function buildModel(
         model,
         apiKey,
         temperature,
-        maxTokens: 4096,
+        maxTokens: maxTokens,
       });
 
     case "openai":
@@ -55,7 +57,7 @@ export function buildModel(
         model,
         apiKey,
         temperature,
-        maxTokens: 4096,
+        maxTokens: maxTokens,
       });
 
     case "anthropic":
@@ -63,7 +65,7 @@ export function buildModel(
         model,
         apiKey,
         temperature,
-        maxTokens: 4096,
+        maxTokens: maxTokens,
       });
 
     case "ollama":
@@ -74,7 +76,6 @@ export function buildModel(
         model,
         baseUrl: OLLAMA_BASE_URL,
         temperature,
-        numPredict: 4096,
       });
   }
 }
@@ -111,7 +112,11 @@ export function makeAuditorModel(slotIndex: 1 | 2 | 3): BaseChatModel {
 
 /** Supervisor uses temperature 0.0 — purely logical, no creativity. */
 export function makeSupervisorModel(): BaseChatModel {
-  return buildModel(readSupervisorSlot(), 0.0, "http://192.168.0.200:11434");
+  return buildModel(
+    readSupervisorSlot(),
+    0.0,
+    env.SUPERVISOR_OLLAMA_URL ?? env.OLLAMA_BASE_URL,
+  );
 }
 
 // ─── Embedding Model ──────────────────────────────────────────────────────────
@@ -178,4 +183,65 @@ export function applySupervisorOverrides(overrides: {
   if (overrides.provider) process.env.SUPERVISOR_PROVIDER = overrides.provider;
   if (overrides.model) process.env.SUPERVISOR_MODEL = overrides.model;
   if (overrides.apiKey) process.env.SUPERVISOR_API_KEY = overrides.apiKey;
+}
+
+// ─── Auditor Model Builder ────────────────────────────────────────────────────
+
+/**
+ * Build a BaseChatModel from an AuditorConfig.
+ *
+ * Supports ALL providers (ollama, anthropic, openai, gemini, groq).
+ * For Ollama auditors, uses ollamaBaseUrl if set — enabling multi-machine
+ * setups where different auditors run on different physical machines.
+ *
+ * For thinking mode on Ollama: caller must pass numPredict and options separately
+ * after construction — handled in engine.ts runAuditorCall().
+ */
+export function buildAuditorModel(
+  auditorCfg: AuditorConfig,
+  temperature: number = 0.05,
+): BaseChatModel {
+  const ollamaUrl = auditorCfg.ollamaBaseUrl ?? env.OLLAMA_BASE_URL;
+  return buildModel(
+    {
+      provider: auditorCfg.provider,
+      model: auditorCfg.model,
+      apiKey: auditorCfg.apiKey ?? "",
+    },
+    temperature,
+    ollamaUrl,
+  );
+}
+
+/**
+ * Build a cartography model — same provider/machine as the given auditor config,
+ * but with minimal context (8192) and zero temperature for structured extraction.
+ */
+export function buildCartographyModel(
+  auditorCfg: AuditorConfig,
+): BaseChatModel {
+  const ollamaUrl = auditorCfg.ollamaBaseUrl ?? env.OLLAMA_BASE_URL;
+
+  // For Ollama, we need to override numPredict and numCtx — do it via ChatOllama directly
+  if (auditorCfg.provider === "ollama" || !auditorCfg.provider) {
+    return new ChatOllama({
+      model: auditorCfg.model,
+      baseUrl: ollamaUrl,
+      temperature: 0,
+      numPredict: 300,
+      numCtx: 8192,
+      think: false,
+    });
+  }
+
+  // Cloud providers — use buildModel with temp 0, they handle context internally
+  return buildModel(
+    {
+      provider: auditorCfg.provider,
+      model: auditorCfg.model,
+      apiKey: auditorCfg.apiKey ?? "",
+    },
+    0,
+    ollamaUrl,
+  );
 }

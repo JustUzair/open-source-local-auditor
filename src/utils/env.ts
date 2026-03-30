@@ -21,21 +21,27 @@ const EnvSchema = z
     AUDITOR_1_PROVIDER: Provider.default("ollama"),
     AUDITOR_1_MODEL: z.string().min(1).default("qwen-junior-auditor"),
     AUDITOR_1_API_KEY: emptyToUndef.pipe(z.string().optional()),
+    /** Ollama base URL for this auditor's machine. Falls back to OLLAMA_BASE_URL. */
+    AUDITOR_1_OLLAMA_URL: emptyToUndef.pipe(z.string().url().optional()),
 
     // Auditor 2 (conditionally required)
     AUDITOR_2_PROVIDER: emptyToUndef.pipe(Provider.optional()),
     AUDITOR_2_MODEL: emptyToUndef.pipe(z.string().min(1).optional()),
     AUDITOR_2_API_KEY: emptyToUndef.pipe(z.string().optional()),
+    AUDITOR_2_OLLAMA_URL: emptyToUndef.pipe(z.string().url().optional()),
 
     // Auditor 3 (conditionally required)
     AUDITOR_3_PROVIDER: emptyToUndef.pipe(Provider.optional()),
     AUDITOR_3_MODEL: emptyToUndef.pipe(z.string().min(1).optional()),
     AUDITOR_3_API_KEY: emptyToUndef.pipe(z.string().optional()),
+    AUDITOR_3_OLLAMA_URL: emptyToUndef.pipe(z.string().url().optional()),
 
     // Supervisor
     SUPERVISOR_PROVIDER: Provider,
     SUPERVISOR_MODEL: z.string().min(1).default("glm-supervisor"),
     SUPERVISOR_API_KEY: z.string().default(""),
+    /** Ollama base URL for the supervisor machine. Falls back to OLLAMA_BASE_URL. */
+    SUPERVISOR_OLLAMA_URL: emptyToUndef.pipe(z.string().url().optional()),
 
     // Embeddings
     EMBEDDING_PROVIDER: EmbedProvider,
@@ -51,6 +57,21 @@ const EnvSchema = z
     NODE_ENV: z
       .enum(["development", "production", "test"])
       .default("development"),
+
+    // ── Audit engine ─────────────────────────────────────────────────────
+    /** Context window of the auditor model in tokens. Qwen3.5 9B = 32768. */
+    CONTEXT_WINDOW: z.coerce.number().int().positive().default(32768),
+    /** Maximum audit passes before forced stop. */
+    MAX_AUDIT_PASSES: z.coerce.number().int().min(1).max(10).default(3),
+    /** Minimum confidence for a suspicion note to propagate. */
+    MIN_SUSPICION_CONFIDENCE: z.coerce.number().min(0).max(1).default(0.7),
+    /** Max files at full content per batch. */
+    MAX_FULL_FILES_PER_BATCH: z.coerce.number().int().min(1).default(10),
+    /** Enable Qwen3.5 extended thinking (chain-of-thought). */
+    THINKING_ENABLED: z
+      .string()
+      .transform(v => v === "true" || v === "1")
+      .default("false"),
   })
   .superRefine((data, ctx) => {
     const n = data.N_AUDITORS;

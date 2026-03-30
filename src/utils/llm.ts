@@ -2,7 +2,10 @@ import { BaseChatModel } from "@langchain/core/language_models/chat_models";
 import { SystemMessage, HumanMessage } from "@langchain/core/messages";
 import { ZodSchema, ZodError } from "zod";
 import { logger } from "./logger.js";
-
+import { FindingSchema } from "../types/audit.js";
+import { SuspicionNoteSchema } from "../types/audit.js";
+import type { Finding } from "../types/audit.js";
+import type { SuspicionNote } from "../types/protocol.js";
 // ─── Result Types ─────────────────────────────────────────────────────────────
 
 export type LLMSuccess<T> = {
@@ -199,4 +202,78 @@ ${JSON.stringify(example, null, 2)}
 
 If you find no issues, respond with: {"findings": []}
 `.trim();
+}
+
+// ─── Auditor Output Parser ────────────────────────────────────────────────────
+
+/**
+ * Parse the raw text output from an auditor Modelfile call.
+ *
+ * The Modelfile outputs:
+ *   [{...finding1}, {...finding2}]
+ *   SUSPICIONS:
+ *   [{...suspicion1}]
+ *
+ * Split on "SUSPICIONS:", parse each part as a JSON array,
+ * validate each element against the appropriate Zod schema.
+ * Invalid elements are silently dropped — partial results beat total failure.
+ */
+export function parseAuditorOutput(raw: string): {
+  findings: Finding[];
+  suspicions: Omit<SuspicionNote, "auditorId" | "passNumber">[];
+} {
+  const splitIdx = raw.indexOf("SUSPICIONS:");
+  const findingsPart =
+    splitIdx >= 0 ? raw.slice(0, splitIdx).trim() : raw.trim();
+  const suspicionsPart =
+    splitIdx >= 0 ? raw.slice(splitIdx + "SUSPICIONS:".length).trim() : "";
+
+  return {
+    findings: parseFindingsArray(findingsPart),
+    suspicions: suspicionsPart ? parseSuspicionsArray(suspicionsPart) : [],
+  };
+}
+
+function parseFindingsArray(text: string): Finding[] {
+  if (!text) return [];
+  try {
+    const parsed = extractJSON(text);
+    const arr = Array.isArray(parsed)
+      ? parsed
+      : ((parsed as any)?.findings ?? []);
+    return arr
+      .map((item: unknown) => {
+        const result = FindingSchema.safeParse(item);
+        return result.success ? result.data : null;
+      })
+      .filter(Boolean) as Finding[];
+  } catch {
+    return [];
+  }
+}
+
+function parseSuspicionsArray(
+  text: string,
+): Omit<SuspicionNote, "auditorId" | "passNumber">[] {
+  if (!text) return [];
+  try {
+    const parsed = extractJSON(text);
+    const arr = Array.isArray(parsed) ? parsed : [];
+    // SuspicionNoteSchema has auditorId and passNumber as required fields,
+    // but the model doesn't emit them — use a partial schema for parsing.
+    const PartialSchema = SuspicionNoteSchema.pick({
+      targetFile: true,
+      targetFunction: true,
+      reason: true,
+      confidence: true,
+    });
+    return arr
+      .map((item: unknown) => {
+        const result = PartialSchema.safeParse(item);
+        return result.success ? result.data : null;
+      })
+      .filter(Boolean) as Omit<SuspicionNote, "auditorId" | "passNumber">[];
+  } catch {
+    return [];
+  }
 }

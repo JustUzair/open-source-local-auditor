@@ -25,7 +25,7 @@ function log(
   const configured = (env.SENTINEL_LOG_LEVEL ?? "info") as Level;
   if (LEVEL_RANK[level] < LEVEL_RANK[configured]) return;
 
-  const ts = new Date().toISOString();
+  const ts = new Date().toLocaleString();
   const tag = `[${ts}] ${LEVEL_PREFIX[level]} [${stage}]`;
   const line = `${tag} ${message}`;
 
