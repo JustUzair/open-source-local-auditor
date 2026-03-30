@@ -41,7 +41,7 @@ import { invokeWithSchema, extractJSON } from "../utils/llm.js";
 import { parseAuditorOutput } from "../utils/llm.js";
 import { env } from "../utils/env.js";
 import { logger } from "../utils/logger.js";
-import { AUDITOR_SYSTEM_BY_ROLE } from "./prompts.js";
+import { AUDITOR_SYSTEM } from "./prompts.js";
 import type {
   SourceFile,
   AuditBatch,
@@ -169,7 +169,6 @@ export async function runAudit(
       const thinkingOn = shouldEnableThinking(
         passNumber,
         batch.isSuspicionReaudit,
-        protocolSize,
         config.thinkingEnabled,
       );
 
@@ -361,7 +360,7 @@ async function runAuditorCall(
   thinkingEnabled: boolean,
 ): Promise<AuditorCallResult> {
   // Pick the right system prompt based on role
-  const systemPrompt = AUDITOR_SYSTEM_BY_ROLE[auditorCfg.role ?? "junior"];
+  const systemPrompt = AUDITOR_SYSTEM;
 
   try {
     let model = buildAuditorModel(auditorCfg, 0.05);
@@ -375,6 +374,8 @@ async function runAuditorCall(
         baseUrl: ollamaUrl,
         temperature: 0,
         think: true,
+        streaming: false,
+        
       });
     }
 
@@ -524,14 +525,13 @@ function formatBatchCode(batch: AuditBatch): string {
 export function shouldEnableThinking(
   passNumber: number,
   isSuspicionReaudit: boolean,
-  protocolSize: ProtocolSize,
   globalThinkingEnabled: boolean,
 ): boolean {
   if (!globalThinkingEnabled) return false;
   // Always think on targeted re-audits — focused, high-value, worth the cost
   if (isSuspicionReaudit) return true;
   // Small protocols: think on Pass 1 (single batch, highest leverage)
-  if (passNumber === 1 && protocolSize === "small") return true;
+  if (passNumber === 1) return true;
   // Broad passes on medium/large protocols: off (breadth > depth)
   return false;
 }

@@ -88,7 +88,7 @@ export async function invokeWithSchema<T>(opts: {
 
       rawResponse = extractContentString(response.content);
 
-      logger.debug(stage, "Raw response preview", rawResponse.slice(0, 400));
+      logger.debug(stage, "Raw response\n", rawResponse);
 
       const parsed = extractJSON(rawResponse);
       const validated = schema.parse(parsed);
@@ -108,7 +108,7 @@ export async function invokeWithSchema<T>(opts: {
       if (isLast) {
         logger.error(stage, `All ${maxRetries + 1} attempts failed`, {
           lastError: msg,
-          rawPreview: rawResponse.slice(0, 500),
+          rawPreview: rawResponse,
         });
         return { ok: false, error: msg, rawResponse, stage };
       }
