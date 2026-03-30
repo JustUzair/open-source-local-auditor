@@ -6,23 +6,130 @@ import type { SourceFile } from "../types/protocol.js";
 import { logger } from "../utils/logger.js";
 
 const SKIP_PATTERNS = [
-  /node_modules/,
-  /\.git\//,
-  /\/test(s)?\//i,
-  /\/mock(s)?\//i,
-  /\/script(s)?\//i,
-  /\/deploy\//i,
-  /\/artifacts\//,
-  /\/cache\//,
-  /\/coverage\//,
-  /\/dist\//,
-  /\/build\//,
-  /\/lib\//,
-  /\/out\//,
-  /\/abi\//,
-  /\/deployment\//,
-  /\.(json|md|txt|yaml|yml|toml|lock|env|sh|gitmodules|gitignore)$/i,
-  /\.(png|jpg|svg|gif|wasm|DS_Store)$/i,
+  // ─────────────────────────────────────────────────────────────────────────
+  // Dependencies & package managers
+  /(^|\/)node_modules\//,
+  /(^|\/)vendor\//,
+  /(^|\/)bower_components\//,
+  /(^|\/)jspm_packages\//,
+  /(^|\/)lib\//, // ← now matches `lib/` at any position
+  /(^|\/)libs\//,
+
+  // Lock files (optional – skip if you don't need to audit them)
+  /\.(npm|yarn|pnpm)-?(lock|shrinkwrap)?\.(json|yaml)$/i,
+  /package-lock\.json$/,
+  /yarn\.lock$/,
+  /pnpm-lock\.yaml$/,
+  /Cargo\.lock$/,
+  /Gemfile\.lock$/,
+  /poetry\.lock$/,
+  /composer\.lock$/,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build, output & cache directories
+  /(^|\/)dist\//,
+  /(^|\/)build\//,
+  /(^|\/)out\//,
+  /(^|\/)target\//,
+  /(^|\/)bin\//,
+  /(^|\/)obj\//,
+  /(^|\/)output\//,
+  /(^|\/)coverage\//,
+  /(^|\/)reports?\//,
+  /(^|\/)logs\//,
+  /(^|\/)tmp\//,
+  /(^|\/)temp\//,
+  /(^|\/)\.cache\//,
+  /(^|\/)cache\//, // ← matches `cache/`
+  /(^|\/)artifacts\//,
+  /(^|\/)abi\//,
+  /(^|\/)deployment\//,
+  /(^|\/)data\//, // often user data – skip if not source
+  /(^|\/)\.data\//,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Version control, CI, IDE
+  /(^|\/)\.git\//,
+  /(^|\/)\.svn\//,
+  /(^|\/)\.hg\//,
+  /(^|\/)\.github\//,
+  /(^|\/)\.gitlab\//,
+  /(^|\/)\.circleci\//,
+  /(^|\/)\.travis\//,
+  /(^|\/)\.idea\//,
+  /(^|\/)\.vscode\//,
+  /(^|\/)\.vs\//,
+  /(^|\/)\.history\//,
+  /\.DS_Store$/,
+  /\.gitmodules$/,
+  /\.gitignore$/,
+  /\.gitattributes$/,
+  /\.gitkeep$/,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Test, mock, script & example directories
+  /(^|\/)test(s)?\//i,
+  /(^|\/)mock(s)?\//i,
+  /(^|\/)spec\//,
+  /(^|\/)__tests__\//,
+  /(^|\/)__mocks__\//,
+  /(^|\/)__fixtures__\//,
+  /(^|\/)script(s)?\//i,
+  /(^|\/)tools\//,
+  /(^|\/)examples?\//,
+  /(^|\/)demo\//,
+  /(^|\/)stories\//,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Foundry specific
+  /\.t\.sol$/, // test files
+  /\.s\.sol$/, // script files
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Compiled / generated files (extensions)
+  /\.(min\.js|min\.css|map)$/i,
+  /\.d\.ts$/,
+  /\.(pyc|pyo)$/i,
+  /__pycache__\//,
+  /\.(class|jar|war|ear)$/i,
+  /\.(exe|dll|so|dylib|o|obj|a|lib)$/i,
+  /\.(wasm|wast)$/i,
+  /\.(log|pid|lock|bak|swp|swo|tmp|temp)$/i,
+  /\.(tsbuildinfo|jsbuildinfo)$/i,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Non‑source files (configs, docs, images, etc.)
+  /\.(env|env\..+)$/i,
+  /\.(yaml|yml|toml|json|xml|html|css|scss|less)$/i,
+  /\.(md|markdown|txt|rst|adoc)$/i,
+  /\.(png|jpg|jpeg|gif|svg|ico|webp|bmp|tiff)$/i,
+  /\.(ttf|woff2?|eot|otf)$/i,
+  /\.(pdf|docx?|xlsx?|pptx?)$/i,
+  /\.(zip|tar|gz|bz2|7z|rar)$/i,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Test file naming patterns
+  /\.(test|spec|mock|stories)\.(js|ts|jsx|tsx|sol|py|go|rs)$/i,
+  /\.cy\.(js|ts)$/i,
+  /\.e2e\.(js|ts)$/i,
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build / config files (optional – skip if you don't need them)
+  /Makefile$/,
+  /Cargo\.toml$/,
+  /go\.mod$/,
+  /go\.sum$/,
+  /package\.json$/,
+  /tsconfig\.json$/,
+  /hardhat\.config\.(js|ts)$/i,
+  /foundry\.toml$/,
+  /forge\.toml$/,
+  /remappings\.txt$/,
+  /\.eslintrc\.[a-z]+$/i,
+  /\.prettierrc\.[a-z]+$/i,
+  /\.env\.example$/,
+  /Dockerfile$/,
+  /\.dockerignore$/,
 ];
 
 function shouldSkip(filePath: string): boolean {
