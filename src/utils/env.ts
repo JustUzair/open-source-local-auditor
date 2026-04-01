@@ -60,7 +60,7 @@ const EnvSchema = z
 
     // ── Audit engine ─────────────────────────────────────────────────────
     /** Context window of the auditor model in tokens. Qwen3.5 9B = 32768. */
-    CONTEXT_WINDOW: z.coerce.number().int().positive().default(32768),
+    CONTEXT_WINDOW: z.coerce.number().int().positive().optional(),
     /** Maximum audit passes before forced stop. */
     MAX_AUDIT_PASSES: z.coerce.number().int().min(1).max(10).default(3),
     /** Minimum confidence for a suspicion note to propagate. */

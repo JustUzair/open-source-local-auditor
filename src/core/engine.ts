@@ -485,8 +485,11 @@ async function runOllamaThinkingCall(
       think: true,
       stream: true,
       options: {
-        temperature: 0,
-        num_ctx: 32768,
+        temperature: 0.3,
+        repeat_penalty: 1.2,
+        top_p: 0.5,
+        top_k: 80,
+        num_ctx: 65536,
       },
       messages: [
         { role: "system", content: systemPrompt },
