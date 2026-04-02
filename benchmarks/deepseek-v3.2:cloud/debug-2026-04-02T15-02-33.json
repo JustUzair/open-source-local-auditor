@@ -1,0 +1,18 @@
+{
+  "passCount": 1,
+  "protocolSize": "small",
+  "filesAudited": [
+    "src/Freefall.sol"
+  ],
+  "auditorConfig": [
+    {
+      "id": "auditor-1",
+      "provider": "ollama",
+      "model": "deepseek-v3.2:cloud",
+      "url": "http://localhost:11434"
+    }
+  ],
+  "allSuspicionNotes": [],
+  "propagatedSuspicions": [],
+  "findingCount": 4
+}
