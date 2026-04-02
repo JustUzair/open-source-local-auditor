@@ -219,9 +219,9 @@ You can merge the classes if they have a common root cause. For each class, list
   - **Relevant entry points**: List actual function names from the protocol map (e.g., deposit(), withdraw(), claim()).
 
 [CONCRETE EXPLOIT SCENARIO]
-One clear, step‑by‑step scenario (5–7 steps) that combines the most dangerous pattern with the protocol's actual entry points. Use a numbered list.
+One clear, step‑by‑step scenario 5-7 steps max that combines the most dangerous pattern with the protocol's actual entry points for "How a vulnerability could be exploited using the knowledge and patterns at hand". Use a numbered list.
 
-Do not add any preamble or extra commentary. Keep the total output under 600 words.`;
+Do not add any preamble or extra commentary. Keep the total output under 800 words. The output should strictly mirror the attacker's mindset and not the particular bug or syntax itself`;
 
     const userPrompt = `Protocol being audited (entry points and structure):
 ${mapSnippet}

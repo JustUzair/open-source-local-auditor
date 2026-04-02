@@ -444,11 +444,12 @@ async function runOllamaThinkingCall(
       think: true,
       stream: true,
       options: {
-        temperature: 0.1,
+        temperature: 0.0,
         repeat_penalty: 1.2,
-        top_p: 0.7,
+        top_p: 0.9,
         top_k: 80,
         num_ctx: 65536,
+        seed: 40,
         // num_predict: 20000,
       },
       messages: [

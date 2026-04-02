@@ -182,3 +182,23 @@ os-auditor % npm run cluster
 Setup complete. Run an audit:
   npm run sentinel -- audit ./contracts/
 ```
+
+# Sample Output
+
+```bash
+npm run audit
+```
+
+## Flags:
+
+- --input <path> required — directory or .zip
+- --max-passes <n> overrides MAX_AUDIT_PASSES
+- --context-window <n> overrides CONTEXT_WINDOW
+- --min-confidence <n> overrides MIN_SUSPICION_CONFIDENCE
+- --no-thinking force disable thinking
+- --thinking force enable thinking
+- --output-dir <path> where to write reports (default: ./output)
+
+## Sample Output:
+
+[Audit Output](./output.md)

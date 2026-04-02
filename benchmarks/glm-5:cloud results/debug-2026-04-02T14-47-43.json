@@ -1,9 +1,7 @@
 {
   "passCount": 1,
   "protocolSize": "small",
-  "filesAudited": [
-    "src/Freefall.sol"
-  ],
+  "filesAudited": ["src/Redacted-Contract.sol"],
   "auditorConfig": [
     {
       "id": "auditor-1",

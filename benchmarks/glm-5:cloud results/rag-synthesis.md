@@ -1,7 +1,7 @@
 === SECURITY BRIEFING (synthesized from historical findings) ===
 
 [ROOT CAUSE SUMMARY]
-The most common root cause across findings is inadequate validation of state transitions and external interactions, particularly around balance tracking, fee calculations, and fund locking mechanisms. Gaming and liquidity protocols like Freefall are especially vulnerable when state updates occur after external calls or when mathematical operations lack proper bounds checking. The architecture's reliance on external VRNGConsumer for randomness and IERC20 for token transfers introduces additional trust boundaries that must be carefully validated.
+The most common root cause across findings is inadequate validation of state transitions and external interactions, particularly around balance tracking, fee calculations, and fund locking mechanisms. Gaming and liquidity protocols like Redacted-Contract are especially vulnerable when state updates occur after external calls or when mathematical operations lack proper bounds checking. The architecture's reliance on external VRNGConsumer for randomness and IERC20 for token transfers introduces additional trust boundaries that must be carefully validated.
 
 [VULNERABILITY CLASSES & PATTERNS]
 
@@ -22,6 +22,7 @@ The most common root cause across findings is inadequate validation of state tra
   - **Relevant entry points**: withdraw()
 
 [CONCRETE EXPLOIT SCENARIO]
+
 1. Attacker calls deposit() with a minimal amount to establish a user balance in the liquidity pool.
 2. Attacker observes or manipulates the VRNGConsumer randomness output to predict favorable multiplier values.
 3. Attacker calls withdraw() with a crafted amount that triggers a fee calculation edge case.
