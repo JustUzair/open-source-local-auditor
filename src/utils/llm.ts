@@ -125,25 +125,15 @@ export async function invokeWithSchema<T>(opts: {
 
 // ─── JSON Extraction ──────────────────────────────────────────────────────────
 
-/**
- * Extract and parse JSON from an LLM response that may contain:
- * - Preamble text before the JSON
- * - Markdown code fences (```json ... ``` or ``` ... ```)
- * - Analysis text with brackets (e.g. "balances[addr]", "step [1]")
- * - Extended thinking blocks from Qwen3.5 / other models
- * - Postamble text after the JSON
- *
- * Four strategies, each tried in sequence. Throws if all fail.
- */
 export function extractJSON(text: string): unknown {
   const t = text.trim();
 
-  // Strategy 1: direct parse (model followed instructions perfectly)
+  // Strategy 1: direct parse
   try {
     return JSON.parse(t);
   } catch {}
 
-  // Strategy 2: strip markdown fences — handles ```json\n...\n``` and ```\n...\n```
+  // Strategy 2: strip markdown fences
   const fenceMatch = t.match(/```(?:json)?\s*([\s\S]*?)```/s);
   if (fenceMatch?.[1]) {
     try {
@@ -151,20 +141,10 @@ export function extractJSON(text: string): unknown {
     } catch {}
   }
 
-  // Strategy 3: search RIGHT-TO-LEFT for the last JSON array or object.
-  //
-  // WHY: The old greedy regex (\[[\s\S]*\]) starts from the FIRST '[' in the
-  // text. When the model emits analysis text before the JSON (e.g. thinking
-  // blocks, step-by-step reasoning, or code references like balances[addr]),
-  // the first '[' is in prose, not in the JSON. The greedy match then captures
-  // everything from that prose bracket to the last ']', producing garbage.
-  //
-  // Searching from right-to-left (lastIndexOf) finds the LAST '[' in the text,
-  // which is almost always the opening bracket of the actual findings array.
-  // We try slicing from that position and parsing. If it fails (e.g. the last
-  // '[' is a nested bracket inside the array), we walk left and try again.
-
-  // Try arrays: last '[' first, walk left until one parses
+  // Strategy 3: RIGHT-TO-LEFT search for last JSON array or object.
+  // The old greedy regex started from the FIRST [ (inside <think> blocks
+  // like "balances[addr]") and matched garbage. Searching right-to-left
+  // finds the LAST [ which is almost always the actual findings array.
   let arrayStart = t.lastIndexOf("[");
   while (arrayStart >= 0) {
     try {
@@ -173,7 +153,6 @@ export function extractJSON(text: string): unknown {
     arrayStart = t.lastIndexOf("[", arrayStart - 1);
   }
 
-  // Try objects: last '{' first, walk left
   let objectStart = t.lastIndexOf("{");
   while (objectStart >= 0) {
     try {
@@ -231,31 +210,14 @@ If you find no issues, respond with: {"findings": []}
 
 // ─── Auditor Output Parser ────────────────────────────────────────────────────
 
-/**
- * Parse the raw text output from an auditor Modelfile call.
- *
- * The Modelfile outputs:
- *   [{...finding1}, {...finding2}]
- *   SUSPICIONS:
- *   [{...suspicion1}]
- *
- * Models with extended thinking (Qwen3.5, etc.) may prefix this with
- * <think>...</think> blocks containing their reasoning. These MUST be
- * stripped before JSON extraction — they contain brackets and braces
- * from code analysis that corrupt any regex-based JSON finder.
- *
- * Split on "SUSPICIONS:", parse each part as a JSON array,
- * validate each element against the appropriate Zod schema.
- * Invalid elements are silently dropped — partial results beat total failure.
- */
 export function parseAuditorOutput(raw: string): {
   findings: Finding[];
   suspicions: Omit<SuspicionNote, "auditorId" | "passNumber">[];
 } {
-  // Strip extended thinking blocks FIRST.
+  // Strip thinking blocks FIRST.
   // Qwen3.5 (and other reasoning models) wrap chain-of-thought in <think>...</think>.
-  // These blocks contain brackets from code analysis (e.g. "balances[addr]",
-  // "call graph: A -> [B, C]") that corrupt the JSON extractor if left in place.
+  // These blocks contain brackets from code analysis (balances[addr], pools[0], etc.)
+  // that corrupt any regex-based JSON finder if left in place.
   const stripped = raw.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
 
   const splitIdx = stripped.indexOf("SUSPICIONS:");

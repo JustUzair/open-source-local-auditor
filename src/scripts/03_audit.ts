@@ -155,11 +155,12 @@ function buildEngineConfig(): EngineConfig {
 
   return {
     auditors,
-    contextWindow: parseInt(opts.contextWindow, 10) || env.CONTEXT_WINDOW,
-    maxAuditPasses: parseInt(opts.maxPasses, 10) || env.MAX_AUDIT_PASSES,
+    contextWindow:
+      parseInt(opts.contextWindow, 32768) || env.CONTEXT_WINDOW || 65536,
+    maxAuditPasses: parseInt(opts.maxPasses, 10) || env.MAX_AUDIT_PASSES || 3,
     minSuspicionConfidence:
-      parseFloat(opts.minConfidence) || env.MIN_SUSPICION_CONFIDENCE,
-    maxFullFilesPerBatch: env.MAX_FULL_FILES_PER_BATCH,
+      parseFloat(opts.minConfidence) || env.MIN_SUSPICION_CONFIDENCE || 0.7,
+    maxFullFilesPerBatch: env.MAX_FULL_FILES_PER_BATCH || 5,
     thinkingEnabled,
   };
 }

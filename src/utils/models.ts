@@ -29,7 +29,7 @@ export function buildModel(
   slot: ModelSlotConfig,
   temperature: number,
   OLLAMA_BASE_URL: string = env.OLLAMA_BASE_URL,
-  maxTokens: number = 4096,
+  maxTokens: number = 8192,
 ): BaseChatModel {
   const { provider, model, apiKey } = slot;
 
@@ -76,6 +76,7 @@ export function buildModel(
         model,
         baseUrl: OLLAMA_BASE_URL,
         temperature,
+        repeatPenalty: 1.2,
       });
   }
 }
@@ -199,7 +200,7 @@ export function applySupervisorOverrides(overrides: {
  */
 export function buildAuditorModel(
   auditorCfg: AuditorConfig,
-  temperature: number = 0.05,
+  temperature: number = 0.0,
 ): BaseChatModel {
   const ollamaUrl = auditorCfg.ollamaBaseUrl ?? env.OLLAMA_BASE_URL;
   return buildModel(
@@ -227,10 +228,11 @@ export function buildCartographyModel(
     return new ChatOllama({
       model: auditorCfg.model,
       baseUrl: ollamaUrl,
-      temperature: 0,
+      temperature: 0.9,
       numPredict: 300,
       numCtx: 8192,
       think: false,
+      seed: 40,
     });
   }
 

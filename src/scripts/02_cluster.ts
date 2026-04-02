@@ -14,6 +14,7 @@ import { logger } from "../utils/logger.js";
 import { readCheckpoint, writeCheckpoint } from "../data/checkpoint.js";
 import { storePath, resetVectorStoreCache } from "../data/vector-store.js";
 import { z } from "zod";
+import { ChatOllama } from "@langchain/ollama";
 
 dotenv.config();
 
@@ -25,10 +26,12 @@ const CLUSTERS_DIR = join(DATA_DIR, "clusters");
 const CENTROIDS_FILE = join(CLUSTERS_DIR, "centroids.json");
 
 /**
- * Number of clusters. 35 was chosen to match the ~30 distinct vulnerability
+ * Number of clusters. 35 was chosen initially to match the ~30 distinct vulnerability
  * classes in Solodit while allowing some sub-class granularity.
+ *
+ * UPDATE: Use 10 clusters only to broaden the category of findings in each cluster and prevent overfitting
  */
-const K = 35;
+const K = 10;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -87,7 +90,13 @@ async function autoLabelCluster(
   sampleDocs: Document[],
   usedLabels: Set<string>,
 ): Promise<string> {
-  const model = makeSupervisorModel();
+  const model = new ChatOllama({
+    baseUrl: env.SUPERVISOR_OLLAMA_URL ?? env.OLLAMA_BASE_URL,
+    model: env.SUPERVISOR_MODEL,
+    temperature: 0.1,
+    think: false,
+    streaming: false,
+  });
   const usedArray = Array.from(usedLabels);
 
   // ── Attempt 1: standard label generation ──────────────────────────────────
@@ -98,42 +107,51 @@ async function autoLabelCluster(
     .join("\n---\n");
 
   const LabelSchema = z.object({
-    label: z
+    mechanistic_vulnerability_identifier: z // Change from 'label'
       .string()
-      .min(3)
-      .max(60)
+      .min(10)
       .describe(
-        `A unique snake_case vulnerability class label. ` +
-          `MUST NOT be any of these already-used labels: [${usedArray.join(", ")}]. ` +
-          `Be specific — prefer sub-class labels like 'erc4626_inflation_attack' ` +
-          `over broad ones like 'inflation_attack'.`,
+        `A unique, highly specific snake_case identifier. ` +
+          `Example: 'math_rounding_error' instead of 'high'. ` +
+          `MUST NOT BE: [${usedArray.join(", ")}]`,
       ),
-    rationale: z
+    primary_exploit_vector: z
       .string()
-      .max(150)
-      .describe(
-        "One sentence: what mechanistically distinguishes this cluster from similar ones.",
-      ),
+      .describe("The step-by-step logic of the exploit."), // Extra field for context
+    rationale: z.string().max(500),
   });
 
-  const systemPrompt =
-    "You are a smart contract security researcher specializing in vulnerability taxonomy. " +
-    "Your job is to assign a precise, unique snake_case label to a cluster of related audit findings. " +
-    "Labels must be specific sub-classes, not broad categories. " +
-    "For example, prefer 'erc4626_share_inflation' over 'inflation_attack', " +
-    "'twap_oracle_stale_price' over 'oracle_price_manipulation', " +
-    "'reentrancy_via_erc777_hook' over 'reentrancy', " +
-    "'missing_deadline_check' over 'invalid_input_validation'. " +
-    "Output ONLY the JSON object — no explanation outside the JSON.";
+  // ADD THIS LINE TO FIX THE ERROR:
+  (LabelSchema as any)._example = {
+    mechanistic_vulnerability_identifier: "reentrancy_via_token_callback",
+    primary_exploit_vector:
+      "User calls the contract, contract violates CEI pattern, leading to reentrancy",
+    rationale:
+      "Findings involving external calls to untrusted tokens before state updates.",
+  };
 
-  const userPromptBase =
-    `Assign a unique vulnerability class label to cluster ${clusterId}.\n\n` +
-    `Sample findings from this cluster:\n${sampleText}\n\n` +
-    (usedArray.length > 0
-      ? `FORBIDDEN labels (already used for other clusters — your label MUST differ from ALL of these):\n` +
-        `${usedArray.join(", ")}\n\n`
-      : "") +
-    `Output a specific sub-class label that precisely distinguishes this cluster.`;
+  const systemPrompt =
+    `You are a Senior Smart Contract Auditor. ` +
+    `CRITICAL RULE: You are building a taxonomy. You MUST NOT reuse any of these identifiers: [${usedArray.join(", ")}]. ` +
+    `If a cluster looks like 'high severity', you must identify the SPECIFIC reason (e.g., 'reward_debt_dilution') rather than the severity level.`;
+
+  const userPromptBase = `
+        [GOOD EXAMPLES]
+        - price_oracle_manipulation
+        - math_error
+        - cross_contract_reentrancy
+        - access_control
+        - governance_attack
+
+        [BAD EXAMPLES]
+        - high
+        - dos
+        - logic_error
+
+        Samples from cluster ${clusterId}:
+        ${sampleText}
+        ...
+    `;
 
   const attempt1 = await invokeWithSchema({
     model,
@@ -144,14 +162,33 @@ async function autoLabelCluster(
     maxRetries: 1,
   });
 
-  if (attempt1.ok && !usedLabels.has(attempt1.data.label)) {
-    return attempt1.data.label;
+  //   console.log(
+  //     `
+  //     Attempt - 1 Log RAW
+  //     `,
+  //     attempt1,
+  //   );
+
+  if (
+    attempt1.ok &&
+    !usedLabels.has(attempt1.data.mechanistic_vulnerability_identifier)
+  ) {
+    // console.log(
+    //   `
+    // Attempt - 1
+    // `,
+    //   attempt1.data,
+    // );
+
+    return attempt1.data.mechanistic_vulnerability_identifier;
   }
 
   // ── Attempt 2: explicit differentiation prompt ────────────────────────────
   // The LLM returned a duplicate. Give it fresh samples (different slice)
   // and explicitly ask it to find the mechanistic distinction.
-  const conflictLabel = attempt1.ok ? attempt1.data.label : "(failed)";
+  const conflictLabel = attempt1.ok
+    ? attempt1.data.mechanistic_vulnerability_identifier
+    : "(failed)";
 
   // Docs 2–7: intentional non-overlap with attempt 1's slice (0–4)
   const contrastText = sampleDocs
@@ -178,34 +215,83 @@ async function autoLabelCluster(
     maxRetries: 1,
   });
 
-  if (attempt2.ok && !usedLabels.has(attempt2.data.label)) {
-    return attempt2.data.label;
+  if (
+    attempt2.ok &&
+    !usedLabels.has(attempt2.data.mechanistic_vulnerability_identifier)
+  ) {
+    return attempt2.data.mechanistic_vulnerability_identifier;
   }
 
   // ── Forced suffix fallback ────────────────────────────────────────────────
   // Both LLM attempts produced a duplicate. Extract the most distinguishing
   // keyword from the sample text and append as a sub-class qualifier.
   // Guarantees uniqueness without another API call.
-  const baseLabel =
-    attempt2.ok
-      ? attempt2.data.label
-      : attempt1.ok
-        ? attempt1.data.label
-        : sampleDocs[0]?.metadata?.category ?? `cluster`;
+  const baseLabel = attempt2.ok
+    ? attempt2.data.mechanistic_vulnerability_identifier
+    : attempt1.ok
+      ? attempt1.data.mechanistic_vulnerability_identifier
+      : (sampleDocs[0]?.metadata?.category ?? `cluster`);
 
   // Strip any trailing numeric suffix from a previously-suffixed fallback
   const cleanBase = baseLabel.replace(/_\d+$/, "");
 
   const distinguishingKeywords = [
-    "callback", "hook", "flash_loan", "delegatecall", "proxy", "permit",
-    "signature", "deadline", "slippage", "rounding", "truncation", "overflow",
-    "underflow", "sandwich", "frontrun", "backrun", "mev", "governance",
-    "timelock", "multisig", "pausable", "upgrade", "initializer", "storage",
-    "slot", "collision", "shadowing", "assembly", "selfdestruct", "create2",
-    "cross_chain", "bridge", "relayer", "sequencer", "l2", "rollup",
-    "erc20", "erc721", "erc1155", "erc4626", "erc777", "erc2612",
-    "twap", "chainlink", "pyth", "uniswap", "balancer", "curve", "aave",
-    "compound", "yield", "vault", "pool", "pair", "router", "factory",
+    "callback",
+    "hook",
+    "flash_loan",
+    "delegatecall",
+    "proxy",
+    "permit",
+    "signature",
+    "deadline",
+    "slippage",
+    "rounding",
+    "truncation",
+    "overflow",
+    "underflow",
+    "sandwich",
+    "frontrun",
+    "backrun",
+    "mev",
+    "governance",
+    "timelock",
+    "multisig",
+    "pausable",
+    "upgrade",
+    "initializer",
+    "storage",
+    "slot",
+    "collision",
+    "shadowing",
+    "assembly",
+    "selfdestruct",
+    "create2",
+    "cross_chain",
+    "bridge",
+    "relayer",
+    "sequencer",
+    "l2",
+    "rollup",
+    "erc20",
+    "erc721",
+    "erc1155",
+    "erc4626",
+    "erc777",
+    "erc2612",
+    "twap",
+    "chainlink",
+    "pyth",
+    "uniswap",
+    "balancer",
+    "curve",
+    "aave",
+    "compound",
+    "yield",
+    "vault",
+    "pool",
+    "pair",
+    "router",
+    "factory",
   ];
 
   const rawText = sampleDocs
@@ -219,9 +305,11 @@ async function autoLabelCluster(
       !cleanBase.includes(kw.replace(/_/g, "")),
   );
 
-  const fallbackLabel = distinguisher
-    ? `${cleanBase}_${distinguisher}`
-    : `${cleanBase}_${clusterId}`;
+  const fallbackLabel = (
+    distinguisher
+      ? `${cleanBase}_${distinguisher}`
+      : `${cleanBase}_${clusterId}`
+  ).replaceAll("-", "_");
 
   logger.warn(
     "cluster",

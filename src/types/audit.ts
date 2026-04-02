@@ -57,6 +57,15 @@ export type AgentOutput = z.infer<typeof AgentOutputSchema>;
         "Update balances[msg.sender] = 0 before the external call. Or add OpenZeppelin ReentrancyGuard and the nonReentrant modifier.",
     },
   ],
+  suspicions: [
+    {
+      targetFile: "Token.sol",
+      targetFunction: "approve()",
+      reason:
+        "The approve() function allows changing an existing non-zero allowance, which can lead to the well-known",
+      confidence: 0.8,
+    },
+  ],
 };
 
 // ─── Supervisor Output ────────────────────────────────────────────────────────

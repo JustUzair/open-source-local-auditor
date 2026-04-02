@@ -37,13 +37,13 @@ import {
   buildInitialBatches,
   buildNextPassBatches,
 } from "./batcher.js";
-// import { fetchClusterDiverseFindings } from "../data/retriever.js";
 import { makeSupervisorModel, buildAuditorModel } from "../utils/models.js";
 import { invokeWithSchema, extractJSON } from "../utils/llm.js";
 import { parseAuditorOutput } from "../utils/llm.js";
 import { env } from "../utils/env.js";
 import { logger } from "../utils/logger.js";
 import { AUDITOR_SYSTEM } from "./prompts.js";
+
 import type {
   SourceFile,
   AuditBatch,
@@ -62,9 +62,14 @@ import type {
   AuditMeta,
   AuditorResult,
   AgentResult,
+  AgentOutput,
 } from "../types/audit.js";
-import { SupervisorOutputSchema } from "../types/audit.js";
-import { fetchRelevantFindings } from "../data/retriever.js";
+import { AgentOutputSchema, SupervisorOutputSchema } from "../types/audit.js";
+import { fetchClusterDiverseFindings } from "../data/retriever.js";
+import { runPreScanner, formatLeadsBlock, ScanLead } from "./prescanner.js";
+import { mkdir, writeFile } from "fs/promises";
+import { join } from "path";
+import zodToJsonSchema from "zod-to-json-schema";
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -113,13 +118,26 @@ export async function runAudit(
   }
 
   // ── Phase 2: RAG Retrieval ─────────────────────────────────────────────
-  logger.info("engine", "Phase 2: Fetching RAG context...");
-  //   const ragContext = await fetchClusterDiverseFindings(currentMap.formatted, 6);
-  const ragQuery = buildRagQuery(currentMap, files);
-  const ragContext = await fetchRelevantFindings(ragQuery, 6);
-  logger.info(`engine`, `RAG Context\n`, ragContext);
-  // ── Phase 3: Iterative Audit Loop ──────────────────────────────────────
-  logger.info("engine", "Phase 3: Iterative audit loop...");
+  logger.info("engine", "Phase 2: Fetching RAG context + pre-scanning...");
+
+  // Pre-scanner runs instantly (regex, no LLM)
+  const scanLeads = runPreScanner(files); // TODO: add more regex from the repo
+  logger.info("engine", `Pre-scanner: ${scanLeads.length} leads found`);
+  logger.info("[engine]", "scanLeads written to file for debugging");
+  await mkdir(join(process.cwd(), "output"), { recursive: true });
+  await writeFile(
+    join(process.cwd(), "output", `scan-leads.json`),
+    JSON.stringify(scanLeads),
+    "utf-8",
+  );
+
+  // RAG synthesis — pass config so retriever can call synthesis model
+  const ragContext = await fetchClusterDiverseFindings(
+    currentMap.formatted,
+    config,
+    10,
+  );
+  logger.info("engine", `RAG Context fetched`);
 
   const allAuditorResults: AuditorResult[] = [];
   const allSuspicionNotes: SuspicionNote[] = [];
@@ -177,128 +195,69 @@ export async function runAudit(
         config.thinkingEnabled,
       );
 
-      const guidedPrompt = buildAuditPrompt(
+      const prompt = buildAuditPrompt(
         currentMap,
         ragContext,
         batch,
         passNumber,
-        "guided",
-      );
-      const blindPrompt = buildAuditPrompt(
-        currentMap,
-        ragContext,
-        batch,
-        passNumber,
-        "blind",
+        scanLeads,
       );
 
-      logger.debug(
-        `engine`,
-        `Batch ${batch.batchId} prompt (guided)\n`,
-        guidedPrompt,
-      );
+      logger.debug(`engine`, `Batch ${batch.batchId} prompt\n`, prompt);
 
-      logger.debug(
-        `engine`,
-        `Batch ${batch.batchId} prompt (blind)\n`,
-        blindPrompt,
-      );
-
+      const resultsPromise: Promise<AuditorCallResult>[] = [];
       for (const auditorCfg of config.auditors) {
-        // ── Run A: Guided (with RAG reference) ──────────────────────────────
         logger.info(
           "engine",
-          `  ${auditorCfg.id} [guided]: ${batch.fullFiles.length} files, thinking: ${thinkingOn}`,
+          `  ${auditorCfg.id} [prompt]:  ${batch.fullFiles.length} files, thinking: ${true}`,
         );
-        const guidedResult = await runAuditorCall(
-          auditorCfg,
-          guidedPrompt,
-          thinkingOn,
-        );
+        resultsPromise.push(runAuditorCall(auditorCfg, prompt, true));
+      }
 
-        // ── Run B: Blind (no RAG) ────────────────────────────────────────────
-        // Blind run never uses thinking — the reasoning budget is better spent on
-        // a fresh independent pass than extended chain-of-thought on the same files.
-        logger.info(
-          "engine",
-          `  ${auditorCfg.id} [blind]:  ${batch.fullFiles.length} files, thinking: ${true}`,
-        );
-        const blindResult = await runAuditorCall(auditorCfg, blindPrompt, true);
+      const results = await Promise.all(resultsPromise);
 
-        logAuditorCallResult(auditorCfg.id, "guided", guidedResult);
-        logAuditorCallResult(auditorCfg.id, "blind", blindResult);
+      for (const [index, result] of results.entries()) {
+        logAuditorCallResult(`auditor-${index + 1}`, result);
 
         // ── Merge both runs into one AuditorResult ───────────────────────────
-        const combinedFindings = [
-          ...guidedResult.findings,
-          ...blindResult.findings,
-        ];
+        const combinedFindings = [...result.findings];
 
-        const agentResultGuided: AgentResult = {
-          auditorId: `${auditorCfg.id}-guided`,
-          agentRole: "logical-bugs",
-          model: auditorCfg.model,
-          status: guidedResult.status,
-          findings: guidedResult.findings,
-          error: guidedResult.error,
-          rawResponse: guidedResult.rawResponse.slice(0, 1000),
-          thinkingContent: guidedResult.thinkingContent,
-        };
-
-        const agentResultBlind: AgentResult = {
-          auditorId: `${auditorCfg.id}-blind`,
+        const agentResult: AgentResult = {
+          auditorId: `auditor-${index + 1}`,
           agentRole: "contextual",
-          model: auditorCfg.model,
-          status: blindResult.status,
-          findings: blindResult.findings,
-          error: blindResult.error,
-          rawResponse: blindResult.rawResponse.slice(0, 1000),
-          thinkingContent: blindResult.thinkingContent,
+          model: config.auditors[index].model,
+          status: result.status,
+          findings: result.findings,
+          error: result.error,
+          rawResponse: result.rawResponse.slice(0, 1000),
+          thinkingContent: result.thinkingContent,
         };
 
-        logger.info(
-          "engine",
-          `(((:::::)))agentResultGuided\n`,
-          agentResultGuided,
-        );
-        logger.info(
-          "engine",
-          `(((:::::)))agentResultBlind\n`,
-          agentResultBlind,
+        // logger.info("engine", `(((:::::)))agentResult\n`, agentResult);
+        logger.info("[engine]", "AgentResult written to file for debugging");
+        await mkdir(join(process.cwd(), "output"), { recursive: true });
+        await writeFile(
+          join(process.cwd(), "output", `agent-result-${index + 1}.json`),
+          JSON.stringify(agentResult),
+          "utf-8",
         );
 
         const auditorResult: AuditorResult = {
-          auditorId: auditorCfg.id,
-          model: auditorCfg.model,
-          agents: [agentResultGuided, agentResultBlind],
+          auditorId: `auditor-${index + 1}`,
+          model: config.auditors[index].model,
+          agents: [agentResult],
           allFindings: combinedFindings,
         };
 
         allAuditorResults.push(auditorResult);
 
         // Suspicions from both runs — both can flag cross-file leads
-        const taggedGuided: SuspicionNote[] = guidedResult.suspicions.map(
-          s => ({
-            ...s,
-            auditorId: `${auditorCfg.id}-guided`,
-            passNumber,
-          }),
-        );
-        const taggedBlind: SuspicionNote[] = blindResult.suspicions.map(s => ({
+        const tagged: SuspicionNote[] = result.suspicions.map(s => ({
           ...s,
-          auditorId: `${auditorCfg.id}-blind`,
+          auditorId: `auditor-${index + 1}`,
           passNumber,
         }));
-
-        allSuspicionNotes.push(...taggedGuided, ...taggedBlind);
-        passNewSuspicions.push(...taggedGuided, ...taggedBlind);
-
-        logger.info(
-          "engine",
-          `  ${auditorCfg.id}: guided=${guidedResult.findings.length} + ` +
-            `blind=${blindResult.findings.length} = ${combinedFindings.length} finding(s), ` +
-            `${taggedGuided.length + taggedBlind.length} suspicion(s)`,
-        );
+        passNewSuspicions.push(...tagged);
       }
 
       batch.fullFiles.forEach(f => seenFiles.add(f.path));
@@ -425,7 +384,7 @@ async function runAuditorCall(
 
   // ── Path 2: LangChain (all cloud providers + Ollama without thinking) ──
   try {
-    const model = buildAuditorModel(auditorCfg, 0.05);
+    const model = buildAuditorModel(auditorCfg, 0.2);
     const response = await model.invoke([
       new SystemMessage(systemPrompt),
       new HumanMessage(prompt),
@@ -485,16 +444,20 @@ async function runOllamaThinkingCall(
       think: true,
       stream: true,
       options: {
-        temperature: 0.3,
+        temperature: 0.1,
         repeat_penalty: 1.2,
-        top_p: 0.5,
+        top_p: 0.7,
         top_k: 80,
         num_ctx: 65536,
+        // num_predict: 20000,
       },
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: prompt },
       ],
+      format: auditorCfg.model.startsWith("qwen")
+        ? zodToJsonSchema(AgentOutputSchema)
+        : "json",
     });
 
     // Stream thinking to CLI in real time — dim/grey prefix so it's visually
@@ -612,55 +575,25 @@ async function runSupervisor(
 
 // ─── Prompt Builder ───────────────────────────────────────────────────────────
 
-/**
- * Build the audit prompt for a given batch and run type.
- *
- * RUN TYPE "guided":
- *   Includes the RAG section framed as "similar patterns to watch for"
- *   — not "these are the only bugs". The framing matters enormously.
- *   The model should use RAG as hints, not constraints.
- *
- * RUN TYPE "blind":
- *   No RAG section at all. Pure reasoning from the code + Protocol Map.
- *   The model has no anchoring bias from historical patterns.
- *   Often catches bugs the guided run misses because it's not
- *   pattern-matching against the RAG clusters.
- *
- * Both runs see the same Protocol Map (global codebase awareness).
- * Both run the same system prompt methodology.
- * The supervisor deduplicates and merges findings from both.
- */
+// Update buildAuditPrompt signature to accept leads:
 function buildAuditPrompt(
   map: ProtocolMap,
   ragContext: string,
   batch: AuditBatch,
   passNumber: number,
-  runType: "guided" | "blind" = "guided",
+  scanLeads: ScanLead[], // ADD THIS
 ): string {
-  const sections: string[] = [`=== PROTOCOL MAP ===\n${map.formatted}`];
+  const sections: string[] = [];
 
-  // ── RAG section — guided run only ──────────────────────────────────────
-  if (runType === "guided") {
-    sections.push(
-      `=== SIMILAR VULNERABILITY PATTERNS (Reference Only) ===\n` +
-        `The following are examples of bugs found in similar protocols.\n` +
-        `Use these as a REFERENCE and INSPIRATION — not as a checklist.\n` +
-        `The actual bugs in this codebase may be completely different.\n` +
-        `Do NOT limit your findings to these categories.\n\n` +
-        ragContext,
-    );
-  } else {
-    // Blind run — explicitly tell model there's no reference material
-    sections.push(
-      `=== BLIND AUDIT — NO REFERENCE PATTERNS ===\n` +
-        `This is an independent audit pass with no historical reference patterns.\n` +
-        `Reason entirely from the code. Find bugs the reference-guided pass might miss.\n` +
-        `Be especially attentive to: business logic, state invariants, token accounting,\n` +
-        `access control asymmetries, and protocol-specific edge cases.`,
-    );
-  }
+  // RAG context goes first (security briefing or raw findings)
+  sections.push(`=== PROTOCOL MAP ===\n${map.formatted}`);
+  sections.push(`=== SECURITY CONTEXT ===\n${ragContext}`);
 
-  // ── Suspicion focus block (re-audit passes) ────────────────────────────
+  // Pre-scan leads injected BEFORE code — LLM sees them before contract content
+  const leadsBlock = formatLeadsBlock(scanLeads, 8);
+  if (leadsBlock) sections.push(leadsBlock);
+
+  // Suspicion re-audit block (existing logic)
   if (batch.isSuspicionReaudit && batch.triggeringSuspicions.length > 0) {
     const focusBlock = batch.triggeringSuspicions
       .map(
@@ -669,18 +602,9 @@ function buildAuditPrompt(
           `  Reason: ${s.reason} [confidence: ${s.confidence}]`,
       )
       .join("\n\n");
-
     sections.push(
       `=== PASS ${passNumber} FOCUS — INVESTIGATE THESE SPECIFICALLY ===\n` +
-        `${focusBlock}\n\n` +
-        `These were flagged in a previous pass. Prioritize these functions.\n` +
-        `Use the Protocol Map to understand full cross-file context.`,
-    );
-  } else if (passNumber > 1) {
-    sections.push(
-      `=== PASS ${passNumber} — CONTINUATION ===\n` +
-        `These files were not audited at full depth in previous passes.\n` +
-        `The Protocol Map includes ⚠ suspicion markers from prior passes — treat them as high-priority.`,
+        `${focusBlock}\n\nThese were flagged in a previous pass. Prioritize them.`,
     );
   }
 
@@ -816,18 +740,17 @@ function logAuditorConfig(config: EngineConfig): void {
 
 function logAuditorCallResult(
   auditorId: string,
-  runType: "guided" | "blind",
   result: AuditorCallResult,
 ): void {
   logger.info(
     "engine",
-    `Auditor ${auditorId} [${runType}] result: ${result.status} — ` +
+    `Auditor ${auditorId} [auditor] result: ${result.status} — ` +
       `${result.findings.length} finding(s), ${result.suspicions.length} suspicion(s)`,
   );
   if (result.status === "failed" || result.status === "empty") {
     logger.debug(
       "engine",
-      `${auditorId} [${runType}] rawResponse preview:\n` +
+      `${auditorId} [auditor] rawResponse preview:\n` +
         result.rawResponse.slice(0, 300),
     );
   }

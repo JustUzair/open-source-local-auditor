@@ -53,7 +53,8 @@
     "ollama": "^0.6.3",
     "ora": "^8.1.0",
     "p-limit": "^6.1.0",
-    "zod": "^3.23.0"
+    "zod": "^3.23.0",
+    "zod-to-json-schema": "^3.25.2"
   },
   "devDependencies": {
     "@google/generative-ai": "^0.21.0",
