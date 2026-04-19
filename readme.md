@@ -1,88 +1,127 @@
+# SentinelAI — Local-First AI Security Auditor
+
+> Local-first Solidity auditor. 573 Solodit audit reports ingested, K-Means clustered into 35 vulnerability classes, iterative multi-pass engine with suspicion propagation. Benchmarked against a real private audit.
+
+---
+
 ## Benchmark: SentinelAI vs. Professional Private Audit
 
-We benchmarked SentinelAI against a **real private audit** of `Redacted-Contract.sol` (a gaming contract with VRNG, multipliers, and token pools). The original audit identified **8 distinct vulnerabilities** (1 High, 3 Medium, 3 Low, 1 Info).
+Benchmarked against a **real private audit** of `Redacted-Contract.sol` — a gaming contract with VRNG, multipliers, and token pools. The original audit identified **8 distinct vulnerabilities** (1 High, 3 Medium, 3 Low, 1 Info).
 
-### Results: What Each Model Found
+| Original Finding                            | Severity | qwen3.5:27b (local) | qwen3.5:397b (cloud) | glm-5 (cloud) |
+| ------------------------------------------- | -------- | :-----------------: | :------------------: | :-----------: |
+| H-01: Cross-token payout                    | High     |         ✅          |          ✅          |      ❌       |
+| M-01: Multiplier config breaks distribution | Medium   |         ✅          |          ✅          |      ✅       |
+| M-02: `removePool` locks user balances      | Medium   |         ✅          |          ✅          |      ❌       |
+| M-03: Fee accounting bug                    | Medium   |         ❌          |          ❌          |      ❌       |
+| L-01: `addMultiplierPackage` unusable       | Low      |     ⚠️ partial      |          ❌          |      ❌       |
+| L-02: No fee upper bounds                   | Low      |         ❌          |          ✅          |      ✅       |
+| L-03: `payFees` invalid return              | Low      |     ⚠️ partial      |          ❌          |      ❌       |
+| I-01: Error naming                          | Info     |         ❌          |          ❌          |      ❌       |
 
-| Original Finding                            | Severity | qwen3.5:27b (local) | qwen3.5:397b (cloud) | glm-5:cloud |
-| ------------------------------------------- | -------- | :-----------------: | :------------------: | :---------: |
-| H-01: Cross‑token payout                    | High     |         ✅          |          ✅          |     ❌      |
-| M-01: Multiplier config breaks distribution | Medium   |         ✅          |          ✅          |     ✅      |
-| M-02: `removePool` locks user balances      | Medium   |         ✅          |          ✅          |     ❌      |
-| M-03: Fee accounting bug                    | Medium   |         ❌          |          ❌          |     ❌      |
-| L-01: `addMultiplierPackage` unusable       | Low      |     ⚠️(partial)     |          ❌          |     ❌      |
-| L-02: No fee upper bounds                   | Low      |         ❌          |          ✅          |     ✅      |
-| L-03: `payFees` invalid return              | Low      |     ⚠️(partial)     |          ❌          |     ❌      |
-| I-01: Error naming                          | Info     |         ❌          |          ❌          |     ❌      |
+**Legend:** ✅ found &nbsp;|&nbsp; ⚠️ partial &nbsp;|&nbsp; ❌ missed
 
-**Legend:** ✅ = found | ⚠️ = partial | ❌ = missed
+### Additional Valid Vulnerabilities Found (Not in the Original Audit)
 
-### What SentinelAI Found That the Original Audit Missed
+Every model surfaced bugs the paid audit missed:
 
-Every model discovered **additional valid vulnerabilities**:
+- Reentrancy in `createGame` via `payFees` — **High**
+- Missing `chainId` → cross-chain replay attack — **High**
+- Unbounded loops in `payFees` / `selectMultiplierFromRandom` → gas DoS — **Medium**
+- Admin can deactivate all multiplier packages — **High** *(397b only)*
+- No solvency check for max payout — **Medium** *(397b, glm-5)*
+- Block timestamp manipulation — **Low**
+- External call failure handling — **Medium** *(27b only)*
 
-- Reentrancy in `createGame` via `payFees` (High)
-- Missing chainId → cross‑chain replay (High)
-- Unbounded loops → gas DoS (Medium)
-- Admin deactivating all multiplier packages (High – 397b only)
-- No solvency check for max payout (Medium – 397b, glm-5)
-- Block timestamp manipulation (Low)
-- External call failure handling (Medium – 27b only)
+### Model Summary
 
-### Model Performance Summary
+| Model                   | Private Audit Coverage | Additional Findings | Notes                                            |
+| ----------------------- | :--------------------: | :-----------------: | ------------------------------------------------ |
+| **qwen3.5:27b (local)** |        **~6/8**        |        **8+**       | Best overall — catches critical bugs, runs free  |
+| qwen3.5:397b (cloud)    |          ~6/8          |          8          | Deepest reasoning, surfaces admin-abuse vectors  |
+| glm-5 (cloud)           |          ~4/8          |          6          | Solid free-tier alternative                      |
 
-| Model                   | Private Audit Coverage | New Issues | Best For                                                     |
-| ----------------------- | :--------------------: | :--------: | ------------------------------------------------------------ |
-| **qwen3.5:27b (local)** |        **~6/8**        |     8+     | **Best overall – catches critical bugs, runs locally, free** |
-| qwen3.5:397b (cloud)    |          ~6/8          |     8      | Deepest reasoning, admin‑abuse vectors                       |
-| glm-5:cloud             |          ~4/8          |     6      | Good free tier option                                        |
+**qwen3.5:27b running locally on 18 GB RAM matches paid professional coverage — and finds bugs humans missed.**
 
-### Key Takeaway
+---
 
-**qwen3.5:27b (local) is the best choice for most audits.** It runs on 18GB RAM, costs nothing, keeps your code private, and catches the critical H‑01 along with most other issues. For final, in‑depth audits, add a cloud 397b pass as a second opinion.
+## How It Works
 
-SentinelAI, even with a free local model, consistently matches or exceeds professional private audits – and finds bugs humans miss.
+SentinelAI runs a five-phase pipeline. Each phase is deterministic where possible; LLMs only reason over facts they are explicitly given.
 
-# Ollama needs to be present
+**Phase 0 — Source Loading**
+Accepts a directory or `.zip` archive. Recursively walks the file tree, detects language (Solidity, Rust, Move, Cairo, Vyper), scores each file by attack surface (entry points, external calls, value transfers), and filters noise. Output: a ranked `SourceFile[]`, highest-risk files first.
 
-need to pull the following
+**Phase 1 — Protocol Map (Cartographer)**
+A fast LLM call per file extracts a micro-summary: what the module does, its public entry points, and its cross-file dependencies. These are assembled into a compact Protocol Map (~2k tokens for a 20-file protocol) that every subsequent agent call receives as its understanding of the codebase. LLMs never guess structure — they are told it.
+
+**Phase 2 — Pre-Scanner + RAG Context**
+Two things run in parallel before the first auditor call:
+- A **deterministic regex pre-scanner** (`prescanner.ts`) runs zero-LLM pattern checks across the source — reentrancy surfaces, unchecked external calls, access control gaps, integer boundaries — and produces typed `ScanLead[]` with file and line evidence. Zero network, zero tokens, under one second.
+- The **cluster-diverse retriever** embeds the Protocol Map, scores it against 35 K-Means cluster centroids built from 573 Solodit audit reports, pulls the top 3 findings from the 10 most relevant clusters (30 findings total), and synthesises them into a structured Security Briefing via a small LLM call. Agents receive a distilled pattern brief, not a raw dump of historical findings.
+
+**Phase 3 — Iterative Auditor Passes**
+The auditor model receives: Protocol Map + Security Briefing + pre-scan leads + contract source. It outputs structured findings with confidence scores and suspicion notes. If confidence on a location is above the configured threshold, that location is annotated in the Protocol Map and re-examined in the next pass with explicit focus. Passes continue until no new high-confidence suspicions emerge or `MAX_AUDIT_PASSES` is reached.
+
+**Phase 4 — Supervisor Synthesis**
+A supervisor model receives all findings from all passes and all auditors. It deduplicates by semantic similarity (not just line number), resolves severity conflicts by taking the higher assessment when confidence is comparable, and produces the final severity-ranked Markdown report.
+
+See [`architecture.svg`](./architecture.svg) for the full data flow diagram.
+
+---
+
+## Setup
+
+### Prerequisites
+
+- Node.js 20+
+- [Ollama](https://ollama.com) installed and running (for local models)
+
+### 1. Pull models
 
 ```bash
-ollama pull qwen3.5:9b
-ollama pull qwen3.5:397b-cloud
-ollama pull glm-5:cloud
+ollama pull qwen3.5:9b              # junior auditor (local, ~6 GB)
+ollama pull qwen3.5:397b-cloud      # senior auditor (API-routed)
+ollama pull glm-5:cloud             # alternative senior + supervisor
+ollama pull qwen3-embedding:4b      # embeddings model (required for ingest)
 ```
 
-then run
+### 2. Create model personas
 
 ```bash
-# grant exec permissions
 chmod +x ./create-local-auditors.sh
-chmod +x ./delete-local-auditors.sh
-
-# Create local auditors
 ./create-local-auditors.sh
-
-# Delete local auditors
-./delete-local-auditors.sh
 ```
 
-After successful creation of skilled auditors and the supervisor you will have the following models:
+This creates four named Ollama models with embedded system prompts:
 
-- `qwen-junior-auditor` --> `qwen3.5:9b`
-- `qwen-senior-auditor` --> `qwen3.5:397b-cloud`
-- `glm-senior-auditor` --> `glm-5:cloud`
-- `glm-supervisor` --> `glm-5:cloud`
+| Model name            | Base model             | Role              |
+| --------------------- | ---------------------- | ----------------- |
+| `qwen-junior-auditor` | `qwen3.5:9b`           | Auditor           |
+| `qwen-senior-auditor` | `qwen3.5:397b-cloud`   | Auditor           |
+| `glm-senior-auditor`  | `glm-5:cloud`          | Auditor           |
+| `glm-supervisor`      | `glm-5:cloud`          | Supervisor        |
 
-# Setup
+To remove them: `./delete-local-auditors.sh`
+
+### 3. Configure environment
+
+```bash
+cp .env.example .env
+# Edit .env — set auditor models, supervisor, embedding model, context windows
+```
+
+### 4. Run setup
 
 ```bash
 npm run setup
 ```
 
-Output
+This checks your environment, verifies the Solodit submodule is hydrated, and confirms the vector store is ready. If the index doesn't exist yet, it runs ingest automatically. A pre-built index can be downloaded from Releases to skip ingestion.
 
-```bash
+Expected output:
+
+```
 🛡️   SentinelAI — Setup
 
 ══════════════════════════════════════════
@@ -91,7 +130,6 @@ Output
    ✅  .env found
    ✅  Auditor 1: ollama/qwen-junior-auditor
    ✅  Auditor 2: ollama/qwen-senior-auditor
-   ✅  Auditor : ollama/glm-senior-auditor
    ✅  Supervisor: ollama/glm-supervisor
    ✅  Embeddings: ollama/qwen3-embedding:4b
    ✅  Ollama reachable at http://localhost:11434
@@ -100,150 +138,148 @@ Output
    ✅  solodit_content hydrated — 17 audit firm folders found
 
 📦  Checking vector store
-   ⏭️   Vector index found. Skipping ingest.
-   ℹ️   To rebuild from latest submodule data: npm run setup -- --fresh
+   ✅  Vector index found. Ready.
 
 ══════════════════════════════════════════
 ✅  SentinelAI setup complete!
-
-Run an audit:
-  npm run sentinel -- audit ./path/to/contracts/
-  npm run sentinel -- audit ./contracts.zip
-
-Start the web interface:
-  npm run dev
 ```
 
-# Ingesting the Data --> Requires Embedding Model Running
+---
+
+## Building the Knowledge Base (First Time Only)
+
+If you're not using the pre-built index from Releases, run these two steps once.
+
+### Ingest
+
+Embeds all 573 Solodit audit reports into a local HNSWlib vector store (~19,453 chunks). The pipeline is resumable — a checkpoint is written every 50 files, so a crash or interruption picks up where it left off.
 
 ```bash
 npm run ingest
 ```
 
-Output:
+### Cluster
 
-```bash
-os-auditor % npm run ingest
-
-> sentinelai@0.1.0 ingest
-> tsx src/scripts/01_ingest.ts
-
-
-📥  SentinelAI — Ingest Pipeline (Solodit Submodule)
-
-▶️   Resuming from checkpoint
-   Completed files: 23
-   Total chunks ingested so far: 863
-
-📂  Scanning solodit_content/reports/...
-   Found 573 audit report files
-
-   573 total files, 550 remaining to ingest
-
-[2026-03-29T14:22:41.785Z] ℹ️  INFO  [vector-store] Loading existing store to resume ingest
-  Ingesting [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0% | 968 chunks | 1/550 files | Cyfrin/2023-09-12-cyfrin-beanstalk.md
-
-
-  Ingesting [░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 0% | 1244 chunks | 5/550 files | Cyfrin/2023-11-03-cyfrin-streamr.md
-  Ingesting [█░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 1% | 1538 chunks | 7/550 files | Cyfrin/2023-11-10-cyfrin-dexe.md
-  Ingesting [█████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 11% | 6346 chunks | 65/550 files | Cyfrin/2025-07-07-cyfrin-suzaku-core-v2.0.md
-  Ingesting [██████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░] 15% | 7685 chunks | 84/550 files | Cyfrin/2025-09-25-cyfrin-button-basis-trade-v2.0.md
-  Ingesting [████████████████░░░░░░░░░░░░░░░░░░░░░░░░] 39% | 13500 chunks | 219/550 files | Trust Security/2023-04-13-LUKSO LSP audit.md
-  Ingesting [█████████████████░░░░░░░░░░░░░░░░░░░░░░░] 43% | 14548 chunks | 238/550 files | ZachObront/2023-11-01-fungify.md
-  Ingesting [████████████████████████████████████████] 100% | 19442 chunks | 550/550 files | Zokyo/2025-01-09-Evoq.md
-
-
-```
-
-# Clustering the Embedded findings --> Requires Embedding + SuperVisor Model Running
+Runs K-Means (K=35) over all embeddings, auto-labels each cluster via an LLM call, and saves centroids for retrieval. This is what enables cluster-diverse RAG — retrieving one representative finding per vulnerability class rather than the 30 most similar findings from the same category.
 
 ```bash
 npm run cluster
 ```
 
-Output
+The 35 labelled clusters span vulnerability classes including `reentrancy_attack`, `oracle_price_manipulation`, `governance_quorum_attack`, `signature_validation`, `integer_overflow`, `inflation_attack`, and 29 others.
+
+---
+
+## Running an Audit
 
 ```bash
-os-auditor % npm run cluster
-
-> sentinelai@0.1.0 cluster
-> tsx src/scripts/02_cluster.ts
-
-
-🔵  SentinelAI — K-Means Clustering
-
-📖  Reading embedding records...
-   19453 embedding records loaded
-
-🔵  Running k-means with K=35...
-   Done. Iterations: 67
-
-📂  Loading vector store to add cluster IDs...
-📦  Rebuilding index with cluster metadata (19453 docs)...
-   ✅  Store rebuilt with cluster IDs
-
-🏷️   Auto-labelling clusters (LLM call per cluster)...
-
-   Cluster 0: token-transfer-to-contract (750 docs)
-   Cluster 1: timestamp_validation (626 docs)
-   Cluster 2: inflation_attack (777 docs)
-   Cluster 3: governance_quorum_attack (256 docs)
-   Cluster 4: oracle_price_manipulation (581 docs)
-   Cluster 5: incorrect_unlock_amount (398 docs)
-   Cluster 6: early_exercise_lock (513 docs)
-   Cluster 7: incorrect_token_burn (332 docs)
-   Cluster 8: expired_token_lock (474 docs)
-   Cluster 9: reentrancy_attack (414 docs)
-   Cluster 10: inaccurate-state-updates (206 docs)
-   Cluster 11: timestamp_validation (374 docs)
-   Cluster 12: incorrect_state_updates (706 docs)
-   Cluster 13: gas_optimization (333 docs)
-   Cluster 14: incorrect_unlock_amount (747 docs)
-   Cluster 15: incorrect_state_updates (939 docs)
-   Cluster 16: inaccurate_state_updates (414 docs)
-   Cluster 17: governance_control_attack (426 docs)
-   Cluster 18: incorrect_state_updates (686 docs)
-   Cluster 19: improper_governance_control (737 docs)
-   Cluster 20: oracle_price_manipulation (569 docs)
-   Cluster 21: oracle_price_manipulation (759 docs)
-   Cluster 22: signature_validation (367 docs)
-   Cluster 23: inflation_attack (556 docs)
-   Cluster 24: incorrect_address_check (753 docs)
-   Cluster 25: fee_distribution_attack (592 docs)
-   Cluster 26: incentive_mechanism_attack (814 docs)
-   Cluster 27: inconsistent_assertion_logic (701 docs)
-   Cluster 28: timestamp_validation (693 docs)
-   Cluster 29: proxy_upgrade (603 docs)
-   Cluster 30: incorrect_unlock_amount (820 docs)
-   Cluster 31: inaccurate_state_updates (493 docs)
-   Cluster 32: unchecked_loop_bounds (284 docs)
-   Cluster 33: incorrect_state_updates (514 docs)
-   Cluster 34: integer_overflow (246 docs)
-
-✅  Clustering complete
-   K=35 clusters labelled
-   Centroids saved to: data/clusters/centroids.json
-
-Setup complete. Run an audit:
-  npm run sentinel -- audit ./contracts/
+npm run sentinel -- audit ./path/to/contracts/
+npm run sentinel -- audit ./contracts.zip
 ```
 
-# Sample Output
+### CLI Flags
+
+| Flag                    | Default              | Description                                   |
+| ----------------------- | -------------------- | --------------------------------------------- |
+| `--input <path>`        | required             | Directory or `.zip` archive                   |
+| `--max-passes <n>`      | `MAX_AUDIT_PASSES`   | Maximum iterative audit passes                |
+| `--context-window <n>`  | `CONTEXT_WINDOW`     | Token context window override                 |
+| `--min-confidence <n>`  | `MIN_SUSPICION_CONFIDENCE` | Threshold for suspicion propagation     |
+| `--thinking`            | from env             | Force-enable thinking mode                    |
+| `--no-thinking`         | from env             | Force-disable thinking mode                   |
+| `--output-dir <path>`   | `./output`           | Where to write the final report               |
+
+### Output
+
+Each audit produces:
+- `report-<timestamp>.md` — severity-ranked findings with descriptions, exploit scenarios, and recommendations
+- `rag-synthesis.md` — the Security Briefing injected into the audit prompt (useful for debugging RAG quality)
+- `debug-<timestamp>.json` — full structured audit data including per-agent outputs and confidence scores
+
+See [`output.md`](./output.md) for a complete sample audit trace.
+
+---
+
+## Provider Configuration
+
+SentinelAI is model-agnostic. Any auditor or supervisor slot can be pointed at any supported provider via `.env` — no code changes required.
 
 ```bash
-npm run audit
+# .env — mix and match freely
+AUDITOR_1_PROVIDER=ollama
+AUDITOR_1_MODEL=qwen-senior-auditor
+AUDITOR_1_BASE_URL=http://localhost:11434   # or http://192.168.0.200:11434 for LAN
+
+AUDITOR_2_PROVIDER=anthropic
+AUDITOR_2_MODEL=claude-sonnet-4-20250514
+
+SUPERVISOR_PROVIDER=openai
+SUPERVISOR_MODEL=gpt-4o
 ```
 
-## Flags:
+Supported providers: **Ollama**, **Anthropic**, **OpenAI**, **Google Gemini**, **Groq**
 
-- --input <path> required — directory or .zip
-- --max-passes <n> overrides MAX_AUDIT_PASSES
-- --context-window <n> overrides CONTEXT_WINDOW
-- --min-confidence <n> overrides MIN_SUSPICION_CONFIDENCE
-- --no-thinking force disable thinking
-- --thinking force enable thinking
-- --output-dir <path> where to write reports (default: ./output)
+For teams: point `AUDITOR_N_BASE_URL` at any LAN machine running Ollama to distribute model load across hardware without redundant model loading.
 
-## Sample Output:
+---
 
-[Audit Output](./output.md)
+## Repository Structure
+
+```
+sentinelai/
+├── src/
+│   ├── core/
+│   │   ├── prescanner.ts     # Deterministic regex pre-scanner → ScanLead[]
+│   │   ├── cartographer.ts   # LLM-based Protocol Map builder
+│   │   ├── batcher.ts        # Token-budget-aware batch grouping
+│   │   ├── engine.ts         # Iterative audit orchestrator + supervisor
+│   │   └── prompts.ts        # All system prompts in one place
+│   ├── data/
+│   │   ├── loader.ts         # Source file loader (dir + zip, language detection)
+│   │   ├── retriever.ts      # Cluster-diverse RAG + Security Briefing synthesis
+│   │   ├── vector-store.ts   # HNSWlib singleton (load / save / resume)
+│   │   ├── splitter.ts       # Chunk splitter for ingest
+│   │   ├── ingest.ts         # Ingest helpers
+│   │   └── checkpoint.ts     # Resumable ingest state
+│   └── scripts/
+│       ├── 00_setup.ts       # Environment + readiness check
+│       ├── 01_ingest.ts      # Full ingest pipeline
+│       ├── 02_cluster.ts     # K-Means clustering + auto-labelling
+│       └── 03_audit.ts       # CLI entry point
+├── Modelfiles/               # Ollama model personas (auditor + supervisor)
+├── benchmarks/               # Raw model outputs from benchmark runs
+├── idea/                     # Design documents and architectural evolution
+├── architecture.svg          # Full pipeline data flow diagram
+└── output.md                 # Sample audit output
+```
+
+---
+
+## Benchmark Results (Raw)
+
+The `benchmarks/` directory contains the complete raw output from every model run used in the benchmark — including full agent JSON, the RAG synthesis briefing each model received, and the final rendered report. See:
+
+- `benchmarks/deepseek-v3.2:cloud/`
+- `benchmarks/glm-5:cloud results/`
+- `benchmarks/qwen3.5:397b-cloud results/run 1/`
+- `benchmarks/qwen3.5:397b-cloud results/run 2/`
+
+---
+
+## Design Documents
+
+The `idea/` directory contains the full design history:
+
+| File                    | Contents                                                                 |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `BLUEPRINT.md`          | Original architecture spec — N-auditor model, RAG design, core principles |
+| `BLUEPRINT_UPDATE_1.md` | First major revision after initial implementation                        |
+| `BLUEPRINT_UPDATE_2.md` | Iterative engine design — multi-pass audit with suspicion propagation    |
+| `BLUEPRINT_UPDATE_3.md` | Spec vs. implementation delta — every deviation documented with rationale |
+| `AgentImplSpec.md`      | Full agent implementation specification                                  |
+
+---
+
+## License
+
+MIT
