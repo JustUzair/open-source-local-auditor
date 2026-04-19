@@ -2,6 +2,8 @@
 
 > Local-first Solidity auditor. 573 Solodit audit reports ingested, K-Means clustered into 35 vulnerability classes, iterative multi-pass engine with suspicion propagation. Benchmarked against a real private audit.
 
+-- **More features and enhancements coming soon**
+
 ---
 
 ## Benchmark: SentinelAI vs. Professional Private Audit
@@ -20,18 +22,6 @@ Benchmarked against a **real private audit** of `Redacted-Contract.sol` — a ga
 | I-01: Error naming                          | Info     |         ❌          |          ❌          |      ❌       |
 
 **Legend:** ✅ found &nbsp;|&nbsp; ⚠️ partial &nbsp;|&nbsp; ❌ missed
-
-### Additional Valid Vulnerabilities Found (Not in the Original Audit)
-
-Every model surfaced bugs the paid audit missed:
-
-- Reentrancy in `createGame` via `payFees` — **High**
-- Missing `chainId` → cross-chain replay attack — **High**
-- Unbounded loops in `payFees` / `selectMultiplierFromRandom` → gas DoS — **Medium**
-- Admin can deactivate all multiplier packages — **High** *(397b only)*
-- No solvency check for max payout — **Medium** *(397b, glm-5)*
-- Block timestamp manipulation — **Low**
-- External call failure handling — **Medium** *(27b only)*
 
 ### Model Summary
 
@@ -66,7 +56,7 @@ The auditor model receives: Protocol Map + Security Briefing + pre-scan leads + 
 **Phase 4 — Supervisor Synthesis**
 A supervisor model receives all findings from all passes and all auditors. It deduplicates by semantic similarity (not just line number), resolves severity conflicts by taking the higher assessment when confidence is comparable, and produces the final severity-ranked Markdown report.
 
-See [`architecture.svg`](./architecture.svg) for the full data flow diagram.
+See [`architecture.svg`](./architecture.svg) for the full data flow diagram .
 
 ---
 
